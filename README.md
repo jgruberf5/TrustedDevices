@@ -19,7 +19,7 @@ Alternatively rpm builds can be downloaded from the releases tab on github.
 
 ## Installing the Extension ##
 
-The installation instructions for iControlLX rpm packages is found here:
+The installation instructions for iControlLX rpm packages are found here:
 
 [Installing iControlLX Extensions](https://clouddocs.f5.com/products/iapp/iapp-lx/docker-1_0_4/icontrollx_pacakges/working_with_icontrollx_packages.html)
 
