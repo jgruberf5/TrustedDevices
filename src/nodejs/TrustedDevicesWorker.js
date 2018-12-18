@@ -288,7 +288,7 @@ class TrustedDevicesWorker {
                 .setBody(createBody);
             this.restRequestSender.sendPost(deviceGroupsPostRequest)
                 .then((response) => {
-                    resolve(response);
+                    resolve(response.getBody());
                 })
                 .catch((err) => {
                     reject(err);
