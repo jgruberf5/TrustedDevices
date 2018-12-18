@@ -25,6 +25,16 @@ The installation instructions for iControlLX rpm packages are found here:
 
 This extension has been tested on TMOS version 13.1.1 and the [API Service Gateway](https://hub.docker.com/r/f5devcentral/f5-api-services-gateway/) container.
 
+## Requirements on TMOS Devices ##
+
+Due to limitations imposed by TMOS common interface management, in order for devices to participate in a trust, each TMOS device **must** have a `configsync-ip` non-floating SelfIP defined. Without a `configsync-ip` properly configured, a device's certificate can not be discovered by its peer and the trust can not be established.
+
+Configuring a configsync-ip for your version of TMOS is documented in the TMOS operations guides. The `tmsh` shell command to set the `cconfigsync-ip` is as follows:
+
+`tmsh modify cm device [device_name] configsync-ip [selfipaddress]`
+
+You must provision this before attempting to add device trusts with this extension.
+
 ## Establishing a Trust ##
 
 This extension extends the iControl REST URI namespace at:
