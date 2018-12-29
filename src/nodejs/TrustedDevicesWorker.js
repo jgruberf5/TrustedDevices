@@ -525,6 +525,7 @@ class TrustedDevicesWorker {
                                                     const returnDevice = {
                                                         targetHost: device.address,
                                                         targetPort: device.httpsPort,
+                                                        targetUUID: device.machineId,
                                                         state: device.state
                                                     };
                                                     // Add TMOS specific concerns for used for processing.

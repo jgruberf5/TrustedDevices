@@ -57,21 +57,25 @@ Response
         {
             "targetHost": "172.13.1.107",
             "targetPort": 443,
+            "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
             "state": "ACTIVE"
         },
         {
             "targetHost": "172.13.1.108",
             "targetPort": 443,
+            "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
             "state": "ACTIVE"
         },
         {
             "targetHost": "172.13.1.109",
             "targetPort": 443,
+            "targetUUID": "eee963cc-6dcb-4f02-a640-c4ef5842f9f8",
             "state": "ACTIVE"
         },
         {
             "targetHost": "172.13.1.110",
             "targetPort": 443,
+            "targetUUID": "85651c46-f0ae-479e-95a8-3ebe1795320d",
             "state": "ACTIVE"
         }
     ]
@@ -147,11 +151,13 @@ Response
         {
             "targetHost": "172.13.1.107",
             "targetPort": 443,
+            "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
             "state": "CREATED"
         },
         {
             "targetHost": "172.13.1.108",
             "targetPort": 443,
+            "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
             "state": "CREATED"
         }
     ]
@@ -187,6 +193,7 @@ Response
         {
             "targetHost": "172.13.1.107",
             "targetPort": 443,
+            "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
             "state": "ACTIVE"
         }
     ]
