@@ -522,12 +522,18 @@ class TrustedDevicesWorker {
                                                         inlcudeHidden
                                                     ) && (
                                                         machineId !== device.machineId)) {
+                                                    // Add devices .. ASG and BIG-IP have machineIds
                                                     const returnDevice = {
-                                                        targetHost: device.address,
-                                                        targetPort: device.httpsPort,
                                                         targetUUID: device.machineId,
-                                                        state: device.state
                                                     };
+                                                    // TMOS device specific attributes
+                                                    if(device.hasOwnProperty('mcpDeviceName')) {
+                                                        returnDevice.targetHost = device.address;
+                                                        returnDevice.targetPort = device.httpsPort;
+                                                        returnDevice.targetHostname = device.hostname;
+                                                        returnDevice.targetVersion = device.version;
+                                                        returnDevice.state = device.state;
+                                                    }
                                                     // Add TMOS specific concerns for used for processing.
                                                     // These concerns should not be returned to clients.
                                                     if (inlcudeHidden) {
