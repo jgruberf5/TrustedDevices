@@ -20,6 +20,7 @@ class TrustedDevicesWorker {
 
     constructor() {
         this.WORKER_URI_PATH = "shared/TrustedDevices";
+        this.isPassThrough = true;
         this.isPublic = true;
     }
 
@@ -28,14 +29,46 @@ class TrustedDevicesWorker {
      * @param {Object} restOperation
      */
     onGet(restOperation) {
+        const paths = restOperation.uri.pathname.split('/');
+        const query = restOperation.uri.query;
+
+        let targetDevice = null;
+
+        if (query.targetHost) {
+            targetDevice = query.targetHost;
+        } else if (query.targetUUID) {
+            targetDevice = query.targetUUID;
+        } else if (paths.length > 3) {
+            targetDevice = paths[3];
+        }
+
         try {
-            this.getDevices(false)
+            this.getDevices(false, targetDevice)
                 .then((devices) => {
-                    restOperation.statusCode = 200;
-                    restOperation.body = {
-                        devices: devices
-                    };
-                    this.completeRestOperation(restOperation);
+                    if (targetDevice) {
+                        restOperation.statusCode = 404;
+                        devices.forEach((device) => {
+                            if (device.targetHost == targetDevice || device.targetUUID == targetDevice) {
+                                restOperation.body = {
+                                    devices: [device]
+                                };
+                                restOperation.statusCode = 200;
+                            }
+                        });
+                        if (restOperation.statusCode == 200) {
+                            this.completeRestOperation(restOperation);
+                        } else {
+                            const err = new Error('device ' + targetDevice + ' not found');
+                            err.httpStatusCode = 404;
+                            restOperation.fail(err);
+                        }
+                    } else {
+                        restOperation.body = {
+                            devices: devices
+                        };
+                        restOperation.statusCode = 200;
+                        this.completeRestOperation(restOperation);
+                    }
                 })
                 .catch((err) => {
                     throw err;
@@ -64,111 +97,18 @@ class TrustedDevicesWorker {
                 restOperation.fail(err);
                 return;
             }
-            let desiredDevices = declaration.devices;
-
-            if (desiredDevices.length > 0) {
-                // Create comparison collections.
-                const desiredDeviceDict = {};
-                const existingDeviceDict = {};
-                // Populate desired comparison collection with targetHost:targetPort as the key.
-                desiredDevices.map((device) => {
-                    if (!device.hasOwnProperty('targetPort')) {
-                        device.targetPort = 443;
-                    }
-                    desiredDeviceDict[device.targetHost + ":" + device.targetPort] = device;
-                });
-                try {
-                    this.getDevices(true)
-                        .then((existingDevices) => {
-                            // Populate existing comparison collection with targetHost:targetPort as the key.
-                            existingDevices.map((device) => {
-                                existingDeviceDict[device.targetHost + ":" + device.targetPort] = device;
-                            });
-                            for (let device in desiredDeviceDict) {
-                                if (device in existingDeviceDict) {
-                                    if (existingDeviceDict[device].state === ACTIVE) {
-                                        // Device is desired, exists already, and is active. Don't remove it.
-                                        existingDevices = existingDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
-                                        // Device is desired, exists alerady, and is active. Don't add it.
-                                        desiredDevices = desiredDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
-                                    } else {
-                                        // Device is desired, exists already, but trust is not active. Reset it.
-                                        this.logger.info('resetting ' + device.targetHost + ':' + device.targetPort + ' because its state is:' + device.state);
-                                        if (!desiredDeviceDict[device].hasOwnProperty('targetUsername') ||
-                                            !desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
-                                            const err = new Error();
-                                            err.message = 'declared device missing targetUsername or targetPassphrase';
-                                            err.httpStatusCode = 400;
-                                            restOperation.fail(err);
-                                            return;
-                                        }
-                                    }
-                                } else {
-                                    // Assure that the device declaration has the needed attributed to add.
-                                    if (!desiredDeviceDict[device].hasOwnProperty('targetUsername') ||
-                                        !desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
-                                        const err = new Error();
-                                        err.message = 'declared device missing targetUsername or targetPassphrase';
-                                        err.httpStatusCode = 400;
-                                        restOperation.fail(err);
-                                        return;
-                                    }
-                                }
-                            }
-
-                            // Serially remove devices not desired in the declaration.
-                            Promise.all([this.removeDevices(existingDevices)])
-                                .then(() => {
-                                    Promise.all([this.addDevices(desiredDevices)])
-                                        .then(() => {
-                                            // Get the list of currently trusted devices as
-                                            // the response to our declaration.
-                                            this.getDevices(false)
-                                                .then((devices) => {
-                                                    restOperation.statusCode = 200;
-                                                    restOperation.body = {
-                                                        devices: devices
-                                                    };
-                                                    this.completeRestOperation(restOperation);
-                                                })
-                                                .catch((err) => {
-                                                    this.logger.severe('Error returning list of devices:' + err.message);
-                                                    throw err;
-                                                });
-                                        });
-                                })
-                                .catch((err) => {
-                                    throw err;
-                                });
-                        });
-                } catch (err) {
+            this.declareDevices(declaration.devices)
+                .then((declaredDevices) => {
+                    restOperation.statusCode = 200;
+                    restOperation.body = {
+                        devices: declaredDevices
+                    };
+                    this.completeRestOperation(restOperation);
+                })
+                .catch((err) => {
                     this.logger.severe("POST request to trusted devices failed:" + err.message);
                     restOperation.fail(err);
-                }
-            } else {
-                // There are no desired deviecs. Remove all existing trusted devices.
-                this.removeAllDevices()
-                    .then(() => {
-                        // Get the list of currently trusted devices as
-                        // the response to our declaration.
-                        this.getDevices(false)
-                            .then((devices) => {
-                                restOperation.statusCode = 200;
-                                restOperation.body = {
-                                    devices: devices
-                                };
-                                this.completeRestOperation(restOperation);
-                            })
-                            .catch((err) => {
-                                this.logger.severe('Error returning list of devices:' + err.message);
-                                throw err;
-                            });
-                    })
-                    .catch((err) => {
-                        this.logger.severe('Error removing all trusted devices:' + err.message);
-                        throw err;
-                    });
-            }
+                });
         } catch (err) {
             this.logger.severe("POST request to update trusted devices failed: \n%s", err);
             err.httpStatusCode = 400;
@@ -176,97 +116,409 @@ class TrustedDevicesWorker {
         }
     }
 
+    declareDevices(desiredDevices) {
+        // Create comparison collections.
+        const desiredDeviceDict = {};
+        const existingDeviceDict = {};
+        // Populate desired comparison collection with targetHost:targetPort as the key.
+        desiredDevices.forEach((device) => {
+            if (!device.hasOwnProperty('targetPort')) {
+                device.targetPort = 443;
+            }
+            desiredDeviceDict[device.targetHost + ":" + device.targetPort] = device;
+        });
+        let existingDevices = [];
+        return this.getDevices(true)
+            .then((discoveredDevices) => {
+                existingDevices = discoveredDevices;
+                // Populate existing comparison collection with targetHost:targetPort as the key.
+                existingDevices.forEach((device) => {
+                    existingDeviceDict[device.targetHost + ":" + device.targetPort] = device;
+                });
+                for (let device in desiredDeviceDict) {
+                    if (device in existingDeviceDict) {
+                        if (existingDeviceDict[device].state === ACTIVE) {
+                            // Device is desired, exists already, and is active. Don't remove it.
+                            existingDevices = existingDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
+                            // Device is desired, exists alerady, and is active. Don't add it.
+                            desiredDevices = desiredDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
+                        } else {
+                            // Device is desired, exists already, but trust is not active. Reset it.
+                            this.logger.info('resetting ' + device.targetHost + ':' + device.targetPort + ' because its state is:' + device.state);
+                            if (!desiredDeviceDict[device].hasOwnProperty('targetUsername') ||
+                                !desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
+                                const err = new Error();
+                                err.message = 'declared device missing targetUsername or targetPassphrase';
+                                err.httpStatusCode = 400;
+                                throw err;
+                            }
+                        }
+                    } else {
+                        // Assure that the device declaration has the needed attributed to add.
+                        if (!desiredDeviceDict[device].hasOwnProperty('targetUsername') ||
+                            !desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
+                            const err = new Error();
+                            err.message = 'declared device missing targetUsername or targetPassphrase';
+                            err.httpStatusCode = 400;
+                            throw err;
+                        }
+                    }
+                }
+            })
+            .then(() => {
+                return this.removeDevices(existingDevices);
+            })
+            .then(() => {
+                return this.addDevices(desiredDevices);
+            })
+            .then(() => {
+                return this.getDevices(false);
+            })
+    }
+
+    /**
+     * Request to get all device groups defined on the proxy device
+     * @returns Promise when request completes
+     */
+    getDeviceGroups() {
+        return this.queryDeviceGroups()
+            .then((deviceGroups) => {
+                if (!deviceGroups) {
+                    return Promise.all([this.createDeviceGroup(`${DEVICEGROUP_PREFIX}0`)]);
+                } else {
+                    return Promise.resolve(deviceGroups);
+                }
+            });
+    }
+
     /**
      * Request to resolve device group to add new devices
      * @returns Promise when request completes
      */
+
     resolveDeviceGroup() {
+        // context objects
+        const candidateGroups = {};
+        let lastGroupIndx = 0;
+        let numberOfAvailableGroups = 0;
+        // flow control
+        return this.queryDeviceGroups()
+            .then((deviceGroups) => {
+                const queryDevicesPromises = [];
+                deviceGroups.forEach((deviceGroup) => {
+                    candidateGroups[deviceGroup] = 0;
+                    const devicesQueryPromise = this.queryDevices(deviceGroup)
+                        .then((devices) => {
+                            candidateGroups[deviceGroup] = devices.length;
+                        });
+                    queryDevicesPromises.push(devicesQueryPromise);
+                });
+                return Promise.all(queryDevicesPromises)
+                    .then(() => {
+                        // determine the highest existing index and if any device groups have capacity
+                        Object.keys(candidateGroups).forEach((groupName) => {
+                            const indx = parseInt(groupName.slice(DEVICEGROUP_PREFIX.length));
+                            if (indx > lastGroupIndx) lastGroupIndx = indx;
+                            if (candidateGroups[groupName] < MAX_DEVICES_PER_GROUP) ++numberOfAvailableGroups;
+                        });
+                        if (numberOfAvailableGroups === 0) {
+                            // no capacity left, create a group.
+                            ++lastGroupIndx;
+                            return this.createDeviceGroup(DEVICEGROUP_PREFIX + lastGroupIndx);
+                        } else {
+                            return Promise.resolve(DEVICEGROUP_PREFIX + lastGroupIndx);
+                        }
+                    });
+            });
+    }
+
+    /**
+     * Get all devices in device groups defined on the proxy device
+     * @param boolean to return TMOS concerns in the devices attributes
+     * @returns Promise when request completes
+     */
+    getDevices(inlcudeHidden, targetDevice) {
+        let proxyMachineId = null;
+        return this.getProxyMachineId()
+            .then((machineId) => {
+                proxyMachineId = machineId;
+                return this.getDeviceGroups();
+            })
+            .then((deviceGroups) => {
+                // For each device group, query for devices.
+                const devicesPromises = [];
+                deviceGroups.forEach((deviceGroup) => {
+                    devicesPromises.push(this.queryDevices(deviceGroup));
+                });
+                return Promise.all(devicesPromises);
+            })
+            .then((deviceResponses) => {
+                const returnDevices = [];
+                deviceResponses.forEach((devices) => {
+                    // Return all devices in groups which are not containers.
+                    devices.forEach((device) => {
+                        if (
+                            (device.hasOwnProperty('mcpDeviceName') ||
+                                device.state == UNDISCOVERED ||
+                                inlcudeHidden) &&
+                            (proxyMachineId !== device.machineId)
+                        ) {
+                            // Add devices .. ASG and BIG-IP have machineIds
+                            const returnDevice = {
+                                targetUUID: device.machineId,
+                            };
+                            // TMOS device specific attributes
+                            if (device.hasOwnProperty('mcpDeviceName')) {
+                                returnDevice.targetHost = device.address;
+                                returnDevice.targetPort = device.httpsPort;
+                                returnDevice.targetHostname = device.hostname;
+                                returnDevice.targetVersion = device.version;
+                                returnDevice.state = device.state;
+                            }
+                            // Add TMOS specific concerns for used for processing.
+                            // These concerns should not be returned to clients.
+                            if (inlcudeHidden) {
+                                returnDevice.machineId = device.machineId;
+                                returnDevice.url = deviceGroupsUrl + '/' + device.groupName + '/devices/' + device.uuid;
+                                if (device.hasOwnProperty('mcpDeviceName') ||
+                                    device.state == UNDISCOVERED) {
+                                    returnDevice.isBigIP = true;
+                                } else {
+                                    returnDevice.isBigIP = false;
+                                }
+                            }
+                            // filter if needed
+                            if (!targetDevice || (returnDevice.targetHost == targetDevice || returnDevice.targetUUID == targetDevice)) {
+                                returnDevices.push(returnDevice);
+                            }
+                        }
+                    });
+                });
+                return Promise.resolve(returnDevices);
+            });
+    }
+
+    /**
+     * Assures devices are in the well know device group on the proxy device
+     * @param List of device objects to add to the device group
+     * @returns Promise when assurance completes
+     */
+    addDevices(devicesToAdd) {
+        if (devicesToAdd.length === 0) {
+            return Promise.resolve();
+        } else {
+            const resolvePromises = [];
+            let targetDeviceQueries = [];
+            devicesToAdd.forEach((device) => {
+                const resolvePromise = this.resolveDeviceGroup()
+                    .then((deviceGroup) => {
+                        return this.addDevice(deviceGroup, device)
+                            .then((deviceResponse) => {
+                                this.logger.info('added device id is: ' + deviceResponse.uuid);
+                                targetDeviceQueries.push({
+                                    deviceGroup: deviceGroup,
+                                    deviceId: deviceResponse.uuid
+                                });
+                            });
+                    })
+                    .catch((err) => {
+                        const throwErr = new Error('could not determine the target device group to add device - ' + err.message);
+                        this.logger.severe(throwErr.message);
+                        throw throwErr;
+                    });
+                resolvePromises.push(resolvePromise);
+            });
+            return Promise.all(resolvePromises)
+                .then(() => {
+                    const newDeviceQueries = [];
+                    targetDeviceQueries.forEach((queryItems) => {
+                        const deviceQuery = this.queryDevices(queryItems.deviceGroup)
+                            .then((devices) => {
+                                let deviceFound = false;
+                                devices.forEach((device) => {
+                                    if (device.uuid == queryItems.deviceId) {
+                                        deviceFound = true;
+                                    }
+                                });
+                                if (!deviceFound) {
+                                    this.logger.severe('could not find added device ' + queryItems.deviceId + ' in group ' + queryItems.deviceGroup);
+                                }
+                                return Promise.resolve();
+                            });
+                        newDeviceQueries.push(deviceQuery);
+                    });                    
+                    return Promise.all(newDeviceQueries);
+                })
+                .catch(err => {
+                    const throwErr = new Error('could not add trusted device to proxy - ' + err.message);
+                    this.logger.severe(throwErr.message);
+                    throw throwErr;
+                });
+        }
+    }
+
+    /**
+     * Assures devices are no longer trusted or trust the proxy device
+     * @param List of device objects to remove trust
+     * @returns Promise when assurance completes
+     */
+    removeDevices(devicesToRemove) {
+        if (devicesToRemove.length === 0) {
+            return Promise.resolve();
+        } else {
+            const deletePromises = [];
+            devicesToRemove.forEach((device) => {
+                if (device.isBigIP) {
+                    deletePromises.push(this.removeCertificate(device));
+                }
+                deletePromises.push(this.removeDevice(device));
+            });
+            return Promise.all(deletePromises)
+                .catch((err) => {
+                    const throwErr = new Error('could not remove trusted device from the proxy - ' + err.message);
+                    this.logger.severe(throwErr.message);
+                    throw throwErr;
+                });
+        }
+    }
+
+    removeCertificate(device) {
+        return this.getProxyMachineId()
+            .then((machineId) => {
+                return this.removeCertificateFromTrustedDevice(device, machineId);
+            })
+            .then(() => {
+                if (device.hasOwnProperty('machineId')) {
+                    return this.removeCertificateFromProxy(device.machineId);
+                }
+            });
+    }
+
+    /**
+     * Request to remove a device certificate by its machineId from a trusted device
+     * @param the trusted device to remove certificate
+     * @param the machineId used to identifiy the certificate to remove
+     * @returns Promise when request completes
+     */
+    removeCertificateFromTrustedDevice(device, machineId) {
+        this.logger.info('removing certificate for machineId: ' + machineId + ' from device ' + device.targetHost + ':' + device.targetPort);
+        const certificatePromises = [];
+        return this.queryCertificatesOnRemoteDevice(device)
+            .then((certificates) => {
+                certificates.forEach((cert) => {
+                    if (cert.machineId == machineId) {
+                        certificatePromises.push(this.deleteCertificateOnRemoveDevice(device, cert.certificateId));
+                    }
+                });
+                return Promise.all([certificatePromises]);
+            });
+    }
+
+    /**
+     * Request to remove a device certificate by its machineId from the proxy device
+     * @param the machineId used to identifiy the certificate to remove
+     * @returns Promise when request completes
+     */
+
+    removeCertificateFromProxy(machineId) {
+        this.logger.info('removing certificate for machineId: ' + machineId + ' from proxy');
+        const certificatePromises = [];
+        return this.queryCertificatesOnProxy()
+            .then((certificates) => {
+                certificates.forEach((cert) => {
+                    if (cert.machineId == machineId) {
+                        certificatePromises.push(this.deleteCertificateOnProxy(cert.certificateId));
+                    }
+                });
+                return Promise.all([certificatePromises]);
+            });
+    }
+
+    /** Framework REST Requests */
+
+    /**
+     * return back the proxy machine ID
+     * @returns string machine UUID
+     */
+    getProxyMachineId() {
         return new Promise((resolve, reject) => {
-            // get existing device groups
+            const certGetRequest = this.restOperationFactory.createRestOperationInstance()
+                .setUri(this.url.parse(deviceInfoUrl))
+                .setBasicAuthorization(localauth)
+                .setIsSetBasicAuthHeader(true)
+                .setReferer(this.getUri().href);
+            this.restRequestSender.sendGet(certGetRequest)
+                .then((response) => {
+                    const deivceInfoBody = response.getBody();
+                    if (deivceInfoBody.hasOwnProperty('machineId')) {
+                        resolve(deivceInfoBody.machineId);
+                    } else {
+                        if (fs.existsSync('/machineId')) {
+                            return String(fs.readFileSync('/machineId', 'utf8')).replace(/[^ -~]+/g, "");
+                        } else {
+                            const err = new Error('can not resolve proxy machineId');
+                            reject(err);
+                        }
+                    }
+                })
+                .catch((err) => {
+                    const throwErr = new Error('Error get machineId on the proxy :' + err.message);
+                    this.logger.severe(throwErr.message);
+                    reject(throwErr);
+                });
+        });
+    }
+
+    queryDeviceGroups() {
+        return new Promise((resolve, reject) => {
             const deviceGroupsGetRequest = this.restOperationFactory.createRestOperationInstance()
                 .setUri(this.url.parse(deviceGroupsUrl))
                 .setBasicAuthorization(localauth)
                 .setIsSetBasicAuthHeader(true);
             this.restRequestSender.sendGet(deviceGroupsGetRequest)
                 .then((response) => {
+                    let returnDeviceGroups = [];
                     let respBody = response.getBody();
-                    if (!respBody.hasOwnProperty('items')) {
-                        this.createDeviceGroup(DEVICEGROUP_PREFIX + 0)
-                            .then((response) => {
-                                this.logger.info('resolving proxy device group for new device:' + response.groupName);
-                                resolve(response.groupName);
-                            })
-                            .catch((err) => {
-                                reject(err);
-                            });
-                    } else {
-                        let deviceGroups = respBody.items;
-                        let candidateGroups = [];
-                        deviceGroups.map((deviceGroup) => {
+                    if (respBody.hasOwnProperty('items')) {
+                        respBody.items.forEach((deviceGroup) => {
                             if (deviceGroup.groupName.startsWith(DEVICEGROUP_PREFIX)) {
-                                candidateGroups.push(deviceGroup.groupName);
+                                returnDeviceGroups.push(deviceGroup.groupName);
                             }
                         });
-                        if (candidateGroups.length === 0) {
-                            this.createDeviceGroup(DEVICEGROUP_PREFIX + '0')
-                                .then((response) => {
-                                    this.logger.info('resolving proxy device group for new device:' + response.groupName);
-                                    resolve(response.groupName);
-                                })
-                                .catch((err) => {
-                                    reject(err);
-                                });
-                        } else {
-                            candidateGroups = candidateGroups.sort();
-                            let deviceCountPromises = [];
-                            let deviceGroupsCounts = {};
-                            candidateGroups.map((cg) => {
-                                const devicesGetRequest = this.restOperationFactory.createRestOperationInstance()
-                                    .setUri(this.url.parse(deviceGroupsUrl + '/' + cg + '/devices'))
-                                    .setBasicAuthorization(localauth)
-                                    .setIsSetBasicAuthHeader(true);
-                                const devicesPromise = this.restRequestSender.sendGet(devicesGetRequest)
-                                    .then((response) => {
-                                        deviceGroupsCounts[cg] = response.getBody().items.length;
-                                    })
-                                    .catch((err) => {
-                                        reject(err);
-                                    });
-                                deviceCountPromises.push(devicesPromise);
-                                Promise.all(deviceCountPromises)
-                                    .then(() => {
-                                        let highestIndex = 0;
-                                        let electedDeviceGroup = null;
-                                        Object.keys(deviceGroupsCounts).map((cg) => {
-                                            if (deviceGroupsCounts[cg] < MAX_DEVICES_PER_GROUP) {
-                                                this.logger.info('resolving proxy device group for new device:' + cg);
-                                                resolve(cg);
-                                            } else {
-                                                let index = parseInt(cg.replace(DEVICEGROUP_PREFIX, ''));
-                                                if (index > highestIndex) {
-                                                    highestIndex = index;
-                                                    electedDeviceGroup = DEVICEGROUP_PREFIX + highestIndex;
-                                                }
-                                            }
-                                        });
-                                        if (electedDeviceGroup) {
-                                            this.createDeviceGroup(electedDeviceGroup)
-                                                .then((response) => {
-                                                    this.logger.info('resolving proxy device group for new device:' + response.groupName);
-                                                    resolve(response.groupName);
-                                                })
-                                                .catch((err) => {
-                                                    reject(err);
-                                                });
-                                        }
-                                    });
-                            });
-                        }
                     }
+                    resolve(returnDeviceGroups);
+                })
+                .catch((err) => {
+                    const throwErr = new Error('Error querying device groups:' + err.message);
+                    this.logger.severe(throwErr.message);
+                    reject(throwErr);
                 });
         });
     }
 
+    queryDevices(deviceGroup) {
+        return new Promise((resolve, reject) => {
+            const devicesGroupUrl = deviceGroupsUrl + '/' + deviceGroup + '/devices';
+            const devicesGetRequest = this.restOperationFactory.createRestOperationInstance()
+                .setUri(this.url.parse(devicesGroupUrl))
+                .setBasicAuthorization(localauth)
+                .setIsSetBasicAuthHeader(true);
+            this.restRequestSender.sendGet(devicesGetRequest)
+                .then((response) => {
+                    let returnDevices = [];
+                    const devicesBody = response.getBody();
+                    if (devicesBody.hasOwnProperty('items')) {
+                        returnDevices = devicesBody.items;
+                    }
+                    resolve(returnDevices);
+                })
+                .catch((err) => {
+                    const throwErr = new Error('Error querying devices :' + err.message);
+                    this.logger.severe(throwErr.message);
+                    reject(throwErr);
+                });
+        });
+    }
 
     /**
      * Request to create a named device group on the proxy device
@@ -288,287 +540,40 @@ class TrustedDevicesWorker {
                 .setBody(createBody);
             this.restRequestSender.sendPost(deviceGroupsPostRequest)
                 .then((response) => {
+                    resolve(response.getBody().groupName);
+                })
+                .catch((err) => {
+                    const throwErr = new Error('Error creating device group :' + err.message);
+                    this.logger.severe(throwErr.message);
+                    reject(throwErr);
+                });
+        });
+    }
+
+    addDevice(deviceGroup, device) {
+        return new Promise((resolve, reject) => {
+            const devicesUrl = deviceGroupsUrl + '/' + deviceGroup + '/devices';
+            // build a request to get device groups
+            const createBody = {
+                "userName": device.targetUsername,
+                "password": device.targetPassphrase,
+                "address": device.targetHost,
+                "httpsPort": device.targetPort
+            };
+            const devicePostRequest = this.restOperationFactory.createRestOperationInstance()
+                .setUri(this.url.parse(devicesUrl))
+                .setBasicAuthorization(localauth)
+                .setIsSetBasicAuthHeader(true)
+                .setBody(createBody);
+            this.restRequestSender.sendPost(devicePostRequest)
+                .then((response) => {
+                    this.logger.info('added ' + device.targetHost + ':' + device.targetPort + ' to proxy device group ' + deviceGroup);
                     resolve(response.getBody());
                 })
                 .catch((err) => {
-                    reject(err);
-                });
-        });
-    }
-
-    /**
-     * Request to get all device groups defined on the proxy device
-     * @returns Promise when request completes
-     */
-    getDeviceGroups() {
-        return new Promise((resolve, reject) => {
-            const deviceGroupsGetRequest = this.restOperationFactory.createRestOperationInstance()
-                .setUri(this.url.parse(deviceGroupsUrl))
-                .setBasicAuthorization(localauth)
-                .setIsSetBasicAuthHeader(true);
-            this.restRequestSender.sendGet(deviceGroupsGetRequest)
-                .then((response) => {
-                    let respBody = response.getBody();
-                    if (!respBody.hasOwnProperty('items')) {
-                        // we need to create a device group for our desired devices
-                        Promise.all([this.resolveDeviceGroup()])
-                            .then((deviceGroupName) => {
-                                resolve(deviceGroupName);
-                            })
-                            .catch(err => {
-                                this.logger.severe('could not create device group');
-                                reject(err);
-                            });
-                    }
-                    const returnDeviceGroups = [];
-                    respBody.items.map((deviceGroup) => {
-                        if (deviceGroup.groupName.startsWith(DEVICEGROUP_PREFIX)) {
-                            returnDeviceGroups.push(deviceGroup);
-                        }
-                    });
-                    if (!returnDeviceGroups) {
-                        this.createDeviceGroup(DEVICEGROUP_PREFIX + '0')
-                            .then((response) => {
-                                resolve([response.groupName]);
-                            })
-                            .catch((err) => {
-                                reject(err);
-                            });
-                    } else {
-                        resolve(returnDeviceGroups);
-                    }
-                })
-                .catch(err => {
-                    this.logger.severe('could not get a list of device groups:' + err.message);
-                    reject(err);
-                });
-        });
-    }
-
-    /**
-     * Assures devices are in the well know device group on the proxy device
-     * @param List of device objects to add to the device group
-     * @returns Promise when assurance completes
-     */
-    addDevices(devicesToAdd) {
-        return new Promise((resolve, reject) => {
-            if (devicesToAdd.length > 0) {
-                const addPromises = [];
-                devicesToAdd.map((device) => {
-                    const resolvePromise = this.resolveDeviceGroup()
-                        .then((deviceGroupName) => {
-                            const devicesUrl = deviceGroupsUrl + '/' + deviceGroupName + '/devices';
-                            // build a request to get device groups
-                            const createBody = {
-                                "userName": device.targetUsername,
-                                "password": device.targetPassphrase,
-                                "address": device.targetHost,
-                                "httpsPort": device.targetPort
-                            };
-                            const devicePostRequest = this.restOperationFactory.createRestOperationInstance()
-                                .setUri(this.url.parse(devicesUrl))
-                                .setBasicAuthorization(localauth)
-                                .setIsSetBasicAuthHeader(true)
-                                .setBody(createBody);
-                            const deviceAddPromise = this.restRequestSender.sendPost(devicePostRequest)
-                                .then((response) => {
-                                    this.logger.info('added ' + device.targetHost + ':' + device.targetPort + ' to proxy device group ' + deviceGroupName);
-                                })
-                                .catch((err) => {
-                                    reject(err);
-                                });
-                            addPromises.push(deviceAddPromise);
-                        })
-                        .catch((err) => {
-                            reject(err);
-                        });
-                    addPromises.push(resolvePromise);
-                });
-                Promise.all(addPromises)
-                    .then(() => {
-                        wait(500).then(() => {
-                            resolve();
-                        });
-                    })
-                    .catch(err => {
-                        reject(err);
-                    });
-
-            } else {
-                resolve();
-            }
-        });
-    }
-
-    /**
-     * Assures devices are no longer trusted or trust the proxy device
-     * @param List of device objects to remove trust
-     * @returns Promise when assurance completes
-     */
-    removeDevices(devicesToRemove) {
-        return new Promise((resolve, reject) => {
-            if (devicesToRemove.length > 0) {
-                const deletePromises = [];
-                this.getProxyMachineId()
-                    .then((machineId) => {
-                        devicesToRemove.map((device) => {
-                            if (device.isBigIP) {
-                                // While the trust is still established, remove the proxy certificate
-                                // from the trusted device. Then after, remove the device from the proxy device.
-                                this.removeCertificateFromTrustedDevice(device, machineId)
-                                    .then(() => {
-                                        // Remove the trusted device certificate if it registered properly.
-                                        if (device.hasOwnProperty('machineId')) {
-                                            deletePromises.push(this.removeCertificateFromProxy(device.machineId));
-                                        }
-                                    })
-                                    .catch((err) => {
-                                        this.logger.severe('could not remove proxy certificate from trusted device.');
-                                        reject(err);
-                                    });
-                            }
-                            // Remove the trusted device from the device group.
-                            deletePromises.push(this.removeDevice(device));
-                        });
-                        Promise.all(deletePromises)
-                            .then(() => {
-                                resolve();
-                            })
-                            .catch((err) => {
-                                this.logger.severe('could not remove trusted device from the proxy');
-                                reject(err);
-                            });
-                    });
-            } else {
-                resolve();
-            }
-        });
-    }
-
-    /**
-     * Assures no devices are trusted or trust the proxy device
-     * @returns Promise when assurance completes
-     */
-    removeAllDevices() {
-        return new Promise((resolve, reject) => {
-            this.getDevices(true)
-                .then((devices) => {
-                    if (devices.length > 0) {
-                        const deletePromises = [];
-                        this.getProxyMachineId()
-                            .then((machineId) => {
-                                devices.map((device) => {
-                                    if (device.isBigIP) {
-                                        // While the trust is still established, remove the proxy certificate
-                                        // from the trusted device. Then after, remove the device from the proxy.
-                                        this.removeCertificateFromTrustedDevice(device, machineId)
-                                            .then(() => {
-                                                // Remove the trusted device certificate if it registered properly.
-                                                if (device.hasOwnProperty('machineId')) {
-                                                    deletePromises.push(this.removeCertificateFromProxy(device.machineId));
-                                                }
-                                            })
-                                            .catch((err) => {
-                                                this.logger.severe('could not remove proxy certificate from trusted device.');
-                                                reject(err);
-                                            });
-                                    }
-                                    // Remove the trusted device from the device group.
-                                    deletePromises.push(this.removeDevice(device));
-                                });
-                                Promise.all(deletePromises)
-                                    .then(() => {
-                                        resolve();
-                                    })
-                                    .catch((err) => {
-                                        reject(err);
-                                    });
-                            });
-                    } else {
-                        resolve();
-                    }
-                });
-        });
-    }
-
-    /**
-     * Get all devices in device groups defined on the proxy device
-     * @param boolean to return TMOS concerns in the devices attributes
-     * @returns Promise when request completes
-     */
-    getDevices(inlcudeHidden) {
-        return new Promise((resolve, reject) => {
-            const devices = [];
-            this.getProxyMachineId()
-                .then((machineId) => {
-                    this.getDeviceGroups()
-                        .then((deviceGroups) => {
-                            // For each device group, query for devices.
-                            const devicesPromises = [];
-                            deviceGroups.map((deviceGroup) => {
-                                if (deviceGroup.groupName.startsWith(DEVICEGROUP_PREFIX)) {
-                                    const devicesGroupUrl = deviceGroupsUrl + '/' + deviceGroup.groupName + '/devices';
-                                    const devicesGetRequest = this.restOperationFactory.createRestOperationInstance()
-                                        .setUri(this.url.parse(devicesGroupUrl))
-                                        .setBasicAuthorization(localauth)
-                                        .setIsSetBasicAuthHeader(true);
-                                    const devicesGetPromise = this.restRequestSender.sendGet(devicesGetRequest)
-                                        .then((response) => {
-                                            const devicesBody = response.getBody();
-                                            // Return all devices in groups which are not containers.
-                                            devicesBody.items.map((device, inc) => {
-                                                if ((device.hasOwnProperty('mcpDeviceName') ||
-                                                        device.state == UNDISCOVERED ||
-                                                        inlcudeHidden
-                                                    ) && (
-                                                        machineId !== device.machineId)) {
-                                                    // Add devices .. ASG and BIG-IP have machineIds
-                                                    const returnDevice = {
-                                                        targetUUID: device.machineId,
-                                                    };
-                                                    // TMOS device specific attributes
-                                                    if(device.hasOwnProperty('mcpDeviceName')) {
-                                                        returnDevice.targetHost = device.address;
-                                                        returnDevice.targetPort = device.httpsPort;
-                                                        returnDevice.targetHostname = device.hostname;
-                                                        returnDevice.targetVersion = device.version;
-                                                        returnDevice.state = device.state;
-                                                    }
-                                                    // Add TMOS specific concerns for used for processing.
-                                                    // These concerns should not be returned to clients.
-                                                    if (inlcudeHidden) {
-                                                        returnDevice.machineId = device.machineId;
-                                                        returnDevice.url = devicesGroupUrl + '/' + device.uuid;
-                                                        if (device.hasOwnProperty('mcpDeviceName') ||
-                                                            device.state == UNDISCOVERED) {
-                                                            returnDevice.isBigIP = true;
-                                                        } else {
-                                                            returnDevice.isBigIP = false;
-                                                        }
-                                                    }
-                                                    devices.push(returnDevice);
-                                                }
-                                            });
-                                        })
-                                        .catch((err) => {
-                                            this.logger.severe('Error getting devices from device group:' + err.message);
-                                            reject(err);
-                                        });
-                                    devicesPromises.push(devicesGetPromise);
-                                }
-                            });
-                            Promise.all(devicesPromises)
-                                .then(() => {
-                                    resolve(devices);
-                                })
-                                .catch((err) => {
-                                    reject(err);
-                                });
-                        })
-                        .catch((err) => {
-                            this.logger.severe('Error getting device groups:' + err.message);
-                            reject(err);
-                        });
+                    const throwErr = new Error('Error adding device :' + err.message);
+                    this.logger.severe(throwErr.message);
+                    reject(throwErr);
                 });
         });
     }
@@ -587,165 +592,109 @@ class TrustedDevicesWorker {
                 .setIsSetBasicAuthHeader(true)
                 .setReferer(this.getUri().href);
             this.restRequestSender.sendDelete(deviceDeleteRequest)
-                .then(() => {
-                    resolve();
+                .then((response) => {
+                    resolve(response.getBody());
                 })
                 .catch((err) => {
-                    this.logger.severe('Error removing device from device group:' + err.message);
-                    reject(err);
+                    const throwErr = new Error('Error removing device from device group:' + err.message);
+                    this.logger.severe(throwErr.message);
+                    reject(throwErr);
                 });
         });
     }
 
-    /**
-     * Request to remove a device certificate by its machineId from a trusted device
-     * @param the trusted device to remove certificate
-     * @param the machineId used to identifiy the certificate to remove
-     * @returns Promise when request completes
-     */
-    removeCertificateFromTrustedDevice(device, machineId) {
+    queryCertificatesOnProxy() {
         return new Promise((resolve, reject) => {
-            this.logger.info('removing certificate for machineId: ' + machineId + ' from device ' + device.targetHost + ':' + device.targetPort);
-            const certificatePromises = [];
-            const certPath = '/mgmt/shared/device-certificates';
-            const certUrl = 'https://' + device.targetHost + ":" + device.targetPort + certPath;
-            certificatePromises.push(new Promise((resolve) => {
-                const certGetRequest = this.restOperationFactory.createRestOperationInstance()
-                    .setIdentifiedDeviceRequest(true)
-                    .setUri(this.url.parse(certUrl))
-                    .setReferer(this.getUri().href)
-                    .setMethod('Get');
-                this.eventChannel.emit(this.eventChannel.e.sendRestOperation, certGetRequest,
-                    (response) => {
-                        const certsBody = response.getBody();
-                        if (certsBody.hasOwnProperty('items')) {
-                            const certs = certsBody.items;
-                            certs.map((cert) => {
-                                certificatePromises.push(new Promise((resolve) => {
-                                    if (cert.machineId == machineId) {
-                                        const certDelUrl = certUrl + '/' + cert.certificateId;
-                                        const certDelRequest = this.restOperationFactory.createRestOperationInstance()
-                                            .setIdentifiedDeviceRequest(true)
-                                            .setUri(this.url.parse(certDelUrl))
-                                            .setReferer(this.getUri().href)
-                                            .setMethod('Delete');
-                                        this.eventChannel.emit(this.eventChannel.e.sendRestOperation, certDelRequest,
-                                            (response) => {
-                                                resolve();
-                                            },
-                                            (err) => {
-                                                this.logger.severe('Error deleting certificate from remote device:' + err.message);
-                                                reject(err);
-                                            });
-                                    }
-                                }));
-                            });
-                            resolve();
-                        }
-                    },
-                    (err) => {
-                        reject(err);
-                    }
-                );
-            }));
-            Promise.all([certificatePromises])
-                .then(() => {
-                    resolve();
-                })
-                .catch((err) => {
-                    reject(err);
-                });
-        });
-    }
-
-    /**
-     * Request to remove a device certificate by its machineId from the proxy device
-     * @param the machineId used to identifiy the certificate to remove
-     * @returns Promise when request completes
-     */
-    removeCertificateFromProxy(machineId) {
-        return new Promise((resolve, reject) => {
-            this.logger.info('removing certificate for machineId: ' + machineId + ' from proxy');
             const certGetRequest = this.restOperationFactory.createRestOperationInstance()
                 .setUri(this.url.parse(certUrl))
                 .setBasicAuthorization(localauth)
                 .setIsSetBasicAuthHeader(true)
                 .setReferer(this.getUri().href);
-            const certificateGetPromise = this.restRequestSender.sendGet(certGetRequest)
+            this.restRequestSender.sendGet(certGetRequest)
                 .then((response) => {
+                    let returnCertificates = [];
                     const certsBody = response.getBody();
                     if (certsBody.hasOwnProperty('items')) {
-                        const certs = certsBody.items;
-                        certs.map((cert) => {
-                            if (cert.machineId == machineId) {
-                                const certDelUrl = certUrl + '/' + cert.certificateId;
-                                const certDelRequest = this.restOperationFactory.createRestOperationInstance()
-                                    .setUri(this.url.parse(certDelUrl))
-                                    .setBasicAuthorization(localauth)
-                                    .setIsSetBasicAuthHeader(true)
-                                    .setReferer(this.getUri().href);
-                                const certDeletePromise = this.restRequestSender.sendDelete(certDelRequest);
-                                certDeletePromise
-                                    .then(() => {
-                                        resolve();
-                                    })
-                                    .catch((err) => {
-                                        this.logger.severe('Error deleting certificate from proxy:' + err.message);
-                                        reject(err);
-                                    });
-                                Promise.all([certDeletePromise])
-                                    .then(() => {
-                                        resolve();
-                                    })
-                                    .catch((err) => {
-                                        reject(err);
-                                    });
-                            }
-                        });
+                        returnCertificates = certsBody.items;
                     }
-                    resolve();
+                    resolve(returnCertificates);
                 })
                 .catch((err) => {
-                    this.logger.severe('Error getting certificates from proxy:' + err.message);
-                    reject(err);
-                });
-            Promise.all([certificateGetPromise])
-                .then(() => {
-                    resolve();
-                })
-                .catch((err) => {
-                    reject(err);
+                    const throwErr = new Error('Error querying certificates from proxy :' + err.message);
+                    this.logger.severe(throwErr.message);
+                    reject(throwErr);
                 });
         });
     }
 
-    /**
-     * return back the proxy machine ID
-     * @returns string machine UUID
-     */
-    getProxyMachineId() {
+    deleteCertificateOnProxy(certificateId) {
         return new Promise((resolve, reject) => {
-            const certGetRequest = this.restOperationFactory.createRestOperationInstance()
-                .setUri(this.url.parse(deviceInfoUrl))
+            const certDelUrl = certUrl + '/' + certificateId;
+            const certDelRequest = this.restOperationFactory.createRestOperationInstance()
+                .setUri(this.url.parse(certDelUrl))
                 .setBasicAuthorization(localauth)
                 .setIsSetBasicAuthHeader(true)
                 .setReferer(this.getUri().href);
-            this.restRequestSender.sendGet(certGetRequest)
+            this.restRequestSender.sendDelete(certDelRequest)
                 .then((response) => {
-                    const deivceInfoBody = response.getBody();
-                    if (deivceInfoBody.hasOwnProperty('machineId')) {
-                        resolve(deivceInfoBody.machineId);
-                    } else {
-                        if (fs.existsSync('/machineId')) {
-                            resolve(String(fs.readFileSync('/machineId', 'utf8')).replace(/[^ -~]+/g, ""));
-                        } else {
-                            const err = new Error('can not resolve proxy machineId');
-                            reject(err);
-                        }
-                    }
+                    resolve(response.getBody());
+                })
+                .catch((err) => {
+                    const throwErr = new Error('Error deleting certificate on proxy :' + err.message);
+                    this.logger.severe(throwErr.message);
+                    reject(throwErr);
                 });
         });
     }
+
+    queryCertificatesOnRemoteDevice(device) {
+        return new Promise((resolve, reject) => {
+            const certPath = '/mgmt/shared/device-certificates';
+            const certUrl = 'https://' + device.targetHost + ":" + device.targetPort + certPath;
+            const certGetRequest = this.restOperationFactory.createRestOperationInstance()
+                .setIdentifiedDeviceRequest(true)
+                .setUri(this.url.parse(certUrl))
+                .setReferer(this.getUri().href)
+                .setMethod('Get');
+            this.restRequestSender.sendGet(certGetRequest)
+                .then((response) => {
+                    let returnCertificates = [];
+                    const certsBody = response.getBody();
+                    if (certsBody.hasOwnProperty('items')) {
+                        returnCertificates = certsBody.items;
+                    }
+                    resolve(returnCertificates);
+                })
+                .catch((err) => {
+                    const throwErr = new Error('Error querying certificate on the device :' + err.message + ' assuming offline or untrusted.');
+                    this.logger.severe(throwErr.message);
+                    resolve([]);
+                });
+        });
+    }
+
+    deleteCertificateOnRemoveDevice(device, certificateId) {
+        return new Promise((resolve, reject) => {
+            const certPath = '/mgmt/shared/device-certificates';
+            const certUrl = 'https://' + device.targetHost + ":" + device.targetPort + certPath;
+            const certDelUrl = certUrl + '/' + certificateId;
+            const certDelRequest = this.restOperationFactory.createRestOperationInstance()
+                .setIdentifiedDeviceRequest(true)
+                .setUri(this.url.parse(certDelUrl))
+                .setReferer(this.getUri().href)
+                .setMethod('Delete');
+            this.restRequestSender.sendDelete(certDelRequest)
+                .then((response) => {
+                    resolve(response.getBody());
+                })
+                .catch((err) => {
+                    const throwErr = new Error('Error deleting certificate from device :' + err.message + ' assuming offline or untrusted');
+                    this.logger.severe(throwErr.message);
+                    resolve();
+                });
+        });
+    }
+
 }
 
 /**
