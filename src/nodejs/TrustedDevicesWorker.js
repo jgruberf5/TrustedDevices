@@ -13,6 +13,14 @@ const DEVICEGROUP_PREFIX = 'TrustProxy_';
 const MAX_DEVICES_PER_GROUP = 30;
 
 /**
+ * delay timer
+ * @returns Promise which resolves after timer expires
+ */
+const wait = (ms) => new Promise((resolve) => {
+    setTimeout(resolve, ms);
+});
+
+/**
  * Trusted Device Controller
  * @constructor
  */
@@ -137,13 +145,12 @@ class TrustedDevicesWorker {
                 });
                 for (let device in desiredDeviceDict) {
                     if (device in existingDeviceDict) {
-                        if (existingDeviceDict[device].state === ACTIVE) {
-                            // Device is desired, exists already, and is active. Don't remove it.
+                        if (existingDeviceDict[device].state === ACTIVE || this.inProgress(existingDeviceDict[device].state)) {
+                            // Device is desired, exists already, and is active or in progress. Don't remove it.
                             existingDevices = existingDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
-                            // Device is desired, exists alerady, and is active. Don't add it.
+                            // Device is desired, exists already, and is active or in progress. Don't add it.
                             desiredDevices = desiredDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
                         } else {
-                            // Device is desired, exists already, but trust is not active. Reset it.
                             this.logger.info('resetting ' + device.targetHost + ':' + device.targetPort + ' because its state is:' + device.state);
                             if (!desiredDeviceDict[device].hasOwnProperty('targetUsername') ||
                                 !desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
@@ -173,7 +180,7 @@ class TrustedDevicesWorker {
             })
             .then(() => {
                 return this.getDevices(false);
-            })
+            });
     }
 
     /**
@@ -254,48 +261,76 @@ class TrustedDevicesWorker {
             })
             .then((deviceResponses) => {
                 const returnDevices = [];
+                const devicesToRemove = [];
                 deviceResponses.forEach((devices) => {
                     // Return all devices in groups which are not containers.
                     devices.forEach((device) => {
                         if (
                             (device.hasOwnProperty('mcpDeviceName') ||
-                                device.state == UNDISCOVERED ||
+                                this.inProgress(device.state) ||
                                 inlcudeHidden) &&
                             (proxyMachineId !== device.machineId)
                         ) {
                             // Add devices .. ASG and BIG-IP have machineIds
                             const returnDevice = {
                                 targetUUID: device.machineId,
+                                targetHost: device.address,
+                                targetPort:device.httpsPort,
+                                state: device.state
                             };
                             // TMOS device specific attributes
                             if (device.hasOwnProperty('mcpDeviceName')) {
-                                returnDevice.targetHost = device.address;
-                                returnDevice.targetPort = device.httpsPort;
                                 returnDevice.targetHostname = device.hostname;
                                 returnDevice.targetVersion = device.version;
-                                returnDevice.state = device.state;
                             }
-                            // Add TMOS specific concerns for used for processing.
-                            // These concerns should not be returned to clients.
-                            if (inlcudeHidden) {
+                            if ((device.state.indexOf('FAIL') > -1) || (device.state.indexOf('ERROR') > -1)) {
+                                this.logger.severe('removing device ' + device.machineId + ' in state: ' + device.state);
                                 returnDevice.machineId = device.machineId;
                                 returnDevice.url = deviceGroupsUrl + '/' + device.groupName + '/devices/' + device.uuid;
-                                if (device.hasOwnProperty('mcpDeviceName') ||
-                                    device.state == UNDISCOVERED) {
+                                if (device.hasOwnProperty('mcpDeviceName')) {
                                     returnDevice.isBigIP = true;
                                 } else {
                                     returnDevice.isBigIP = false;
                                 }
-                            }
-                            // filter if needed
-                            if (!targetDevice || (returnDevice.targetHost == targetDevice || returnDevice.targetUUID == targetDevice)) {
-                                returnDevices.push(returnDevice);
+                                devicesToRemove.push(returnDevice);
+                            } else {
+                                // Add TMOS specific concerns for used for processing.
+                                // These concerns should not be returned to clients.
+                                if (inlcudeHidden) {
+                                    returnDevice.machineId = device.machineId;
+                                    returnDevice.url = deviceGroupsUrl + '/' + device.groupName + '/devices/' + device.uuid;
+                                    if (device.hasOwnProperty('mcpDeviceName') ||
+                                        this.inProgress(device.state)) {
+                                        returnDevice.isBigIP = true;
+                                    } else {
+                                        returnDevice.isBigIP = false;
+                                    }
+                                }
+                                // filter if needed
+                                if (!targetDevice || (returnDevice.targetHost == targetDevice || returnDevice.targetUUID == targetDevice)) {
+                                    returnDevices.push(returnDevice);
+                                }
                             }
                         }
                     });
                 });
+                if(devicesToRemove.length > 0) {
+                    this.removeDevices(devicesToRemove);
+                }
                 return Promise.resolve(returnDevices);
             });
+    }
+
+    inProgress(state) {
+        let inProgress = false;
+        if ((state === "PENDING") ||
+            (state === "FRAMEWORK_DEPLOYMENT_PENDING") ||
+            (state === "CERTIFICATE_INSTALL") ||
+            (state === "PENDING_DELETE") ||
+            (state === "UNDISCOVERED")) {
+            inProgress = true;
+        }
+        return inProgress;
     }
 
     /**
@@ -319,12 +354,12 @@ class TrustedDevicesWorker {
                                     deviceGroup: deviceGroup,
                                     deviceId: deviceResponse.uuid
                                 });
+                                resolvePromises.push(wait(1000));
                             });
                     })
                     .catch((err) => {
-                        const throwErr = new Error('could not determine the target device group to add device - ' + err.message);
-                        this.logger.severe(throwErr.message);
-                        throw throwErr;
+                        this.logger.severe(err.message);
+                        throw err;
                     });
                 resolvePromises.push(resolvePromise);
             });
@@ -346,7 +381,7 @@ class TrustedDevicesWorker {
                                 return Promise.resolve();
                             });
                         newDeviceQueries.push(deviceQuery);
-                    });                    
+                    });
                     return Promise.all(newDeviceQueries);
                 })
                 .catch(err => {
@@ -401,6 +436,8 @@ class TrustedDevicesWorker {
      * @returns Promise when request completes
      */
     removeCertificateFromTrustedDevice(device, machineId) {
+        let majorVersion = parseInt(device.targetVersion.split('.')[0]);
+        if(majorVersion > 12) {
         this.logger.info('removing certificate for machineId: ' + machineId + ' from device ' + device.targetHost + ':' + device.targetPort);
         const certificatePromises = [];
         return this.queryCertificatesOnRemoteDevice(device)
@@ -412,6 +449,9 @@ class TrustedDevicesWorker {
                 });
                 return Promise.all([certificatePromises]);
             });
+        } else {
+            return Promise.resolve();
+        }
     }
 
     /**
@@ -696,13 +736,5 @@ class TrustedDevicesWorker {
     }
 
 }
-
-/**
- * delay timer
- * @returns Promise which resolves after timer expires
- */
-const wait = (ms) => new Promise((resolve) => {
-    setTimeout(resolve, ms);
-});
 
 module.exports = TrustedDevicesWorker;

@@ -58,33 +58,33 @@ Response
             "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
             "targetHost": "172.13.1.107",
             "targetPort": 443,
+            "state": "ACTIVE",
             "targetHostname": "bigip1.openstack.local",
-            "targetVersion": "13.1.1",
-            "state": "ACTIVE"
+            "targetVersion": "13.1.1"
         },
         {
             "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
             "targetHost": "172.13.1.108",
             "targetPort": 443,
+            "state": "ACTIVE",
             "targetHostname": "bigip2.openstack.local",
-            "targetVersion": "13.1.1",
-            "state": "ACTIVE"
+            "targetVersion": "13.1.1"
         },
         {
             "targetUUID": "eee963cc-6dcb-4f02-a640-c4ef5842f9f8",
             "targetHost": "172.13.1.109",
             "targetPort": 443,
+            "state": "ACTIVE",
             "targetHostname": "bigip3.openstack.local",
-            "targetVersion": "13.1.1",
-            "state": "ACTIVE"
+            "targetVersion": "13.1.1"
         },
         {
             "targetUUID": "85651c46-f0ae-479e-95a8-3ebe1795320d",
             "targetHost": "172.13.1.110",
             "targetPort": 443,
+            "state": "ACTIVE",
             "targetHostname": "bigip4.openstack.local",
-            "targetVersion": "13.1.1",
-            "state": "ACTIVE"
+            "targetVersion": "13.1.1"
         }
     ]
 }
@@ -160,17 +160,17 @@ Response
             "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
             "targetHost": "172.13.1.107",
             "targetPort": 443,
+            "state": "CREATED",
             "targetHostname": "bigip1.openstack.local",
-            "targetVersion": "13.1.1",
-            "state": "CREATED"
+            "targetVersion": "13.1.1"
         },
         {
             "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
             "targetHost": "172.13.1.108",
             "targetPort": 443,
+            "state": "CREATED",
             "targetHostname": "bigip2.openstack.local",
-            "targetVersion": "13.1.1",
-            "state": "CREATED"
+            "targetVersion": "13.1.1"
         }
     ]
 }
@@ -206,9 +206,9 @@ Response
             "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
             "targetHost": "172.13.1.107",
             "targetPort": 443,
+            "state": "ACTIVE",
             "targetHostname": "bigip2.openstack.local",
-            "targetVersion": "13.1.1",
-            "state": "ACTIVE"
+            "targetVersion": "13.1.1"
         }
     ]
 }
