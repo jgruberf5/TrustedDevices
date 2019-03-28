@@ -236,3 +236,22 @@ Response
 **Detecting Trust Failures**
 
 TrustedDevices polls all declared devices and attempts to make an iControl REST call through the trust every 10 seconds. If the API call succeeds, the `available` attribute for the device is set to `true`, and a `lastValidated` attribute is populated showing the last time trust validation occurred. If the API call fails, the `available` attribute for the device is set to `false`, and two new attributes are added, `failedSince` and `failedReason`. The `failedSince` attribute will show the time of the first of any successive failures and the `failedReason` will show the reason for the last recorded failure.
+
+```
+{
+    "devices": [
+        {
+            "targetUUID": "330ad1e8-4780-46f0-bc73-e311367b989f",
+            "targetHost": "172.13.1.120",
+            "targetPort": 443,
+            "state": "ACTIVE",
+            "targetHostname": "test-11-5-6.sample.openstack.f5se.com",
+            "targetVersion": "11.5.6",
+            "targetRESTVersion": "13.1.0-0.0.6087",
+            "available": false,
+            "failedSince": "2019-03-28T19:10:11.768Z",
+            "failedReason": "connect EHOSTUNREACH 172.13.1.120:443"
+        }
+    ]
+}
+```
