@@ -442,7 +442,7 @@ class TrustedDevicesWorker {
      * @returns Promise when request completes
      */
     removeCertificateFromTrustedDevice(device, machineId) {
-        let majorVersion = parseInt(device.targetVersion.split('.')[0]);
+        let majorVersion = parseInt(device.targetRESTVersion.split('.')[0]);
         if(majorVersion > 12) {
         this.logger.info('removing certificate for machineId: ' + machineId + ' from device ' + device.targetHost + ':' + device.targetPort);
         const certificatePromises = [];
