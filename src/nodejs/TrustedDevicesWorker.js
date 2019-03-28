@@ -146,12 +146,17 @@ class TrustedDevicesWorker {
                 for (let device in desiredDeviceDict) {
                     if (device in existingDeviceDict) {
                         if (existingDeviceDict[device].state === ACTIVE || this.inProgress(existingDeviceDict[device].state)) {
-                            // Device is desired, exists already, and is active or in progress. Don't remove it.
-                            existingDevices = existingDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
-                            // Device is desired, exists already, and is active or in progress. Don't add it.
-                            desiredDevices = desiredDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
+                            if(existingDeviceDict[device].state === ACTIVE && desiredDeviceDict[device].hasOwnProperty('targetUsername') && desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
+                                // credential provided.. refresh the trust
+                                this.logger.info('resetting active device ' + existingDeviceDict[device].targetHost + ':' + existingDeviceDict[device].targetPort + ' because credentials were supplied');
+                            } else {
+                                // Device is desired, exists already, and is active or in progress. Don't remove it.
+                                existingDevices = existingDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
+                                // Device is desired, exists already, and is active or in progress. Don't add it.
+                                desiredDevices = desiredDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
+                            }
                         } else {
-                            this.logger.info('resetting ' + device.targetHost + ':' + device.targetPort + ' because its state is:' + device.state);
+                            this.logger.info('resetting ' + existingDeviceDict[device].targetHost + ':' + existingDeviceDict[device].targetPort + ' because its state is:' + existingDeviceDict[device].state);
                             if (!desiredDeviceDict[device].hasOwnProperty('targetUsername') ||
                                 !desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
                                 const err = new Error();
@@ -282,6 +287,7 @@ class TrustedDevicesWorker {
                             if (device.hasOwnProperty('mcpDeviceName')) {
                                 returnDevice.targetHostname = device.hostname;
                                 returnDevice.targetVersion = device.version;
+                                returnDevice.targetRESTVersion = device.restFrameworkVersion;
                             }
                             if ((device.state.indexOf('FAIL') > -1) || (device.state.indexOf('ERROR') > -1)) {
                                 this.logger.severe('removing device ' + device.machineId + ' in state: ' + device.state);
