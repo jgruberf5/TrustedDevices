@@ -10,8 +10,8 @@ const localauth = 'Basic ' + new Buffer('admin:').toString('base64');
 const ACTIVE = 'ACTIVE';
 const UNDISCOVERED = 'UNDISCOVERED';
 const DEVICEGROUP_PREFIX = 'TrustProxy_';
-const MAX_DEVICES_PER_GROUP = 10;
-const DEVICE_QUERY_INTERVAL = 30000;
+const MAX_DEVICES_PER_GROUP = 20;
+const DEVICE_QUERY_INTERVAL = 10000;
 
 const LOGGINGPREFIX = '[TrustedDevices], ';
 
