@@ -10,7 +10,8 @@ const localauth = 'Basic ' + new Buffer('admin:').toString('base64');
 const ACTIVE = 'ACTIVE';
 const UNDISCOVERED = 'UNDISCOVERED';
 const DEVICEGROUP_PREFIX = 'TrustProxy_';
-const MAX_DEVICES_PER_GROUP = 30;
+const MAX_DEVICES_PER_GROUP = 10;
+const DEVICE_QUERY_INTERVAL = 30000;
 
 /**
  * delay timer
@@ -30,6 +31,20 @@ class TrustedDevicesWorker {
         this.WORKER_URI_PATH = "shared/TrustedDevices";
         this.isPassThrough = true;
         this.isPublic = true;
+        this.failedDevices = {};
+        this.failedReasons = {};
+        this.reachableDevices = {};
+        if(process.env.FAILED_DEVICE_REMOVAL_MILLISECONDS) {
+            this.FAILED_DEVICE_REMOVAL_MILLISECONDS = process.env.FAILED_DEVICE_REMOVAL_MILLISECONDS;
+        } else {
+            this.FAILED_DEVICE_REMOVAL_MILLISECONDS = 0;
+        }
+    }
+
+    onStart(success) {
+        setImmediate(this.validateDevices.bind(this));
+        setInterval(this.validateDevices.bind(this), DEVICE_QUERY_INTERVAL);
+        success();
     }
 
     /**
@@ -146,7 +161,7 @@ class TrustedDevicesWorker {
                 for (let device in desiredDeviceDict) {
                     if (device in existingDeviceDict) {
                         if (existingDeviceDict[device].state === ACTIVE || this.inProgress(existingDeviceDict[device].state)) {
-                            if(existingDeviceDict[device].state === ACTIVE && desiredDeviceDict[device].hasOwnProperty('targetUsername') && desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
+                            if (existingDeviceDict[device].state === ACTIVE && desiredDeviceDict[device].hasOwnProperty('targetUsername') && desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
                                 // credential provided.. refresh the trust
                                 this.logger.info('resetting active device ' + existingDeviceDict[device].targetHost + ':' + existingDeviceDict[device].targetPort + ' because credentials were supplied');
                             } else {
@@ -280,7 +295,7 @@ class TrustedDevicesWorker {
                             const returnDevice = {
                                 targetUUID: device.machineId,
                                 targetHost: device.address,
-                                targetPort:device.httpsPort,
+                                targetPort: device.httpsPort,
                                 state: device.state
                             };
                             // TMOS device specific attributes
@@ -288,6 +303,16 @@ class TrustedDevicesWorker {
                                 returnDevice.targetHostname = device.hostname;
                                 returnDevice.targetVersion = device.version;
                                 returnDevice.targetRESTVersion = device.restFrameworkVersion;
+                                returnDevice.available = false;
+                            }
+                            if (this.reachableDevices[device.address + ':' + device.httpsPort]) {
+                                returnDevice.lastValidated = this.reachableDevices[device.address + ':' + device.httpsPort];
+                                returnDevice.available = true;
+                            }
+                            if (this.failedDevices[device.address + ':' + device.httpsPort]) {
+                                returnDevice.failedSince = this.failedDevices[device.address + ':' + device.httpsPort];
+                                returnDevice.failedReason = this.failedReasons[device.address + ':' + device.httpsPort];
+                                returnDevice.available = false;
                             }
                             if ((device.state.indexOf('FAIL') > -1) || (device.state.indexOf('ERROR') > -1)) {
                                 this.logger.severe('removing device ' + device.machineId + ' in state: ' + device.state);
@@ -320,7 +345,7 @@ class TrustedDevicesWorker {
                         }
                     });
                 });
-                if(devicesToRemove.length > 0) {
+                if (devicesToRemove.length > 0) {
                     this.removeDevices(devicesToRemove);
                 }
                 return Promise.resolve(returnDevices);
@@ -443,18 +468,18 @@ class TrustedDevicesWorker {
      */
     removeCertificateFromTrustedDevice(device, machineId) {
         let majorVersion = parseInt(device.targetRESTVersion.split('.')[0]);
-        if(majorVersion > 12) {
-        this.logger.info('removing certificate for machineId: ' + machineId + ' from device ' + device.targetHost + ':' + device.targetPort);
-        const certificatePromises = [];
-        return this.queryCertificatesOnRemoteDevice(device)
-            .then((certificates) => {
-                certificates.forEach((cert) => {
-                    if (cert.machineId == machineId) {
-                        certificatePromises.push(this.deleteCertificateOnRemoveDevice(device, cert.certificateId));
-                    }
+        if (majorVersion > 12) {
+            this.logger.info('removing certificate for machineId: ' + machineId + ' from device ' + device.targetHost + ':' + device.targetPort);
+            const certificatePromises = [];
+            return this.queryCertificatesOnRemoteDevice(device)
+                .then((certificates) => {
+                    certificates.forEach((cert) => {
+                        if (cert.machineId == machineId) {
+                            certificatePromises.push(this.deleteCertificateOnRemoveDevice(device, cert.certificateId));
+                        }
+                    });
+                    return Promise.all([certificatePromises]);
                 });
-                return Promise.all([certificatePromises]);
-            });
         } else {
             return Promise.resolve();
         }
@@ -565,6 +590,41 @@ class TrustedDevicesWorker {
                 });
         });
     }
+
+    validateDevices() {
+        this.getDevices(true)
+            .then((devices) => {
+                devices.forEach((device) => {
+                    if (device.state == ACTIVE && device.isBigIP) {
+                        this.pingRemoteDevice(device)
+                            .then((reachable) => {
+                                if (reachable) {
+                                    delete this.failedDevices[device.targetHost + ':' + device.targetPort];
+                                    delete this.failedReasons[device.targetHost + ':' + device.targetPort];
+                                    this.reachableDevices[device.targetHost + ':' + device.targetPort] = new Date();
+                                } else {
+                                    delete this.reachableDevices[device.targetHost + ':' + device.targetPort];
+                                    if (this.failedDevices[device.targetHost + ':' + device.targetPort] && (this.FAILED_DEVICE_REMOVAL_MILLISECONDS > 0)) {
+                                        const secLeft = new Date().getTime() - this.failedDevices[device.targetHost + ':' + device.targetPort];
+                                        if (secLeft > this.FAILED_DEVICE_REMOVAL_MILLISECONDS) {
+                                            this.logger.severe('could not reach active device ' + device.targetHost + ':' + device.targetPort + ' for ' + ((this.FAILED_DEVICE_REMOVAL_MILLISECONDS + secLeft) / 1000) + ' seconds.. removing trust.');
+                                            this.removeDevices([device]);
+                                        } else {
+                                            this.logger.severe('could not reach active device ' + device.targetHost + ':' + device.targetPort + ' ' + ((this.FAILED_DEVICE_REMOVAL_MILLISECONDS - secLeft) / 1000) + ' seconds left until it will be removed from the trust.');
+                                        }
+                                    } else {
+                                        this.failedDevices[device.targetHost + ':' + device.targetPort] = new Date();
+                                    }
+                                }
+                            });
+                    }
+                });
+            })
+            .catch((err) => {
+                this.logger.severe('could not validate devices - ' + err.message);
+            });
+    }
+
 
     /**
      * Request to create a named device group on the proxy device
@@ -737,6 +797,28 @@ class TrustedDevicesWorker {
                     const throwErr = new Error('Error deleting certificate from device :' + err.message + ' assuming offline or untrusted');
                     this.logger.severe(throwErr.message);
                     resolve();
+                });
+        });
+    }
+
+    pingRemoteDevice(device) {
+        return new Promise((resolve, reject) => {
+            const echoPath = '/mgmt/shared/echo';
+            const certUrl = 'https://' + device.targetHost + ":" + device.targetPort + echoPath;
+            const certGetRequest = this.restOperationFactory.createRestOperationInstance()
+                .setIdentifiedDeviceRequest(true)
+                .setUri(this.url.parse(certUrl))
+                .setReferer(this.getUri().href)
+                .setMethod('Get');
+            this.restRequestSender.sendGet(certGetRequest)
+                .then(() => {
+                    resolve(true);
+                })
+                .catch((err) => {
+                    const throwErr = new Error();
+                    this.failedReasons[device.targetHost + ':' + device.targetPort] = err.message;
+                    this.logger.severe('Error validating trust of ' + device.targetHost + ':' + device.targetPort + ' - ' + err.message);
+                    resolve(false);
                 });
         });
     }
