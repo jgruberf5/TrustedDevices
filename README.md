@@ -61,6 +61,9 @@ Response
             "state": "ACTIVE",
             "targetHostname": "bigip1.openstack.local",
             "targetVersion": "13.1.1"
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": true,
+            "lastValidated": "2019-03-28T18:38:00.053Z"
         },
         {
             "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
@@ -69,6 +72,9 @@ Response
             "state": "ACTIVE",
             "targetHostname": "bigip2.openstack.local",
             "targetVersion": "13.1.1"
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": true,
+            "lastValidated": "2019-03-28T18:38:01.018Z"
         },
         {
             "targetUUID": "eee963cc-6dcb-4f02-a640-c4ef5842f9f8",
@@ -77,6 +83,9 @@ Response
             "state": "ACTIVE",
             "targetHostname": "bigip3.openstack.local",
             "targetVersion": "13.1.1"
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": true,
+            "lastValidated": "2019-03-28T18:38:01.026Z"
         },
         {
             "targetUUID": "85651c46-f0ae-479e-95a8-3ebe1795320d",
@@ -85,6 +94,9 @@ Response
             "state": "ACTIVE",
             "targetHostname": "bigip4.openstack.local",
             "targetVersion": "13.1.1"
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": true,
+            "lastValidated": "2019-03-28T18:38:02.001Z"
         }
     ]
 }
@@ -162,7 +174,9 @@ Response
             "targetPort": 443,
             "state": "CREATED",
             "targetHostname": "bigip1.openstack.local",
-            "targetVersion": "13.1.1"
+            "targetVersion": "13.1.1",
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": false
         },
         {
             "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
@@ -170,7 +184,9 @@ Response
             "targetPort": 443,
             "state": "CREATED",
             "targetHostname": "bigip2.openstack.local",
-            "targetVersion": "13.1.1"
+            "targetVersion": "13.1.1",
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": false
         }
     ]
 }
@@ -208,8 +224,15 @@ Response
             "targetPort": 443,
             "state": "ACTIVE",
             "targetHostname": "bigip2.openstack.local",
-            "targetVersion": "13.1.1"
+            "targetVersion": "13.1.1",
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": false
         }
     ]
 }
+
 ```
+
+**Detecting Trust Failures**
+
+TrustedDevices polls all declared devices and attempts to make an iControl REST call through the trust every 10 seconds. If the API call succeeds, the `available` attribute for the device is set to `true`, and a `lastValidated` attribute is populated showing the last time trust validation occurred. If the API call fails, the `available` attribute for the device is set to `false`, and two new attributes are added, `failedSince` and `failedReason`. The `failedSince` attribute will show the time of the first of any successive failures and the `failedReason` will show the reason for the last recorded failure.
