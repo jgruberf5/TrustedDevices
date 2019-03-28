@@ -13,6 +13,8 @@ const DEVICEGROUP_PREFIX = 'TrustProxy_';
 const MAX_DEVICES_PER_GROUP = 10;
 const DEVICE_QUERY_INTERVAL = 30000;
 
+const LOGGINGPREFIX = '[TrustedDevices], ';
+
 /**
  * delay timer
  * @returns Promise which resolves after timer expires
@@ -97,7 +99,7 @@ class TrustedDevicesWorker {
                     throw err;
                 });
         } catch (err) {
-            this.logger.severe("GET request to retrieve trusted devices failed: \n%s", err);
+            this.logger.severe(LOGGINGPREFIX + "GET request to retrieve trusted devices failed: \n%s", err);
             err.httpStatusCode = 400;
             restOperation.fail(err);
         }
@@ -116,7 +118,7 @@ class TrustedDevicesWorker {
                 const err = new Error();
                 err.message = 'declaration missing';
                 err.httpStatusCode = 400;
-                this.logger.severe("POST request to trusted devices failed: declaration missing");
+                this.logger.severe(LOGGINGPREFIX + "POST request to trusted devices failed: declaration missing");
                 restOperation.fail(err);
                 return;
             }
@@ -129,11 +131,11 @@ class TrustedDevicesWorker {
                     this.completeRestOperation(restOperation);
                 })
                 .catch((err) => {
-                    this.logger.severe("POST request to trusted devices failed:" + err.message);
+                    this.logger.severe(LOGGINGPREFIX + "POST request to trusted devices failed:" + err.message);
                     restOperation.fail(err);
                 });
         } catch (err) {
-            this.logger.severe("POST request to update trusted devices failed: \n%s", err);
+            this.logger.severe(LOGGINGPREFIX + "POST request to update trusted devices failed: \n%s", err);
             err.httpStatusCode = 400;
             restOperation.fail(err);
         }
@@ -163,7 +165,7 @@ class TrustedDevicesWorker {
                         if (existingDeviceDict[device].state === ACTIVE || this.inProgress(existingDeviceDict[device].state)) {
                             if (existingDeviceDict[device].state === ACTIVE && desiredDeviceDict[device].hasOwnProperty('targetUsername') && desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
                                 // credential provided.. refresh the trust
-                                this.logger.info('resetting active device ' + existingDeviceDict[device].targetHost + ':' + existingDeviceDict[device].targetPort + ' because credentials were supplied');
+                                this.logger.info(LOGGINGPREFIX + 'resetting active device ' + existingDeviceDict[device].targetHost + ':' + existingDeviceDict[device].targetPort + ' because credentials were supplied');
                             } else {
                                 // Device is desired, exists already, and is active or in progress. Don't remove it.
                                 existingDevices = existingDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
@@ -171,7 +173,7 @@ class TrustedDevicesWorker {
                                 desiredDevices = desiredDevices.filter(t => t.targetHost + ':' + t.targetPort !== device); // jshint ignore:line
                             }
                         } else {
-                            this.logger.info('resetting ' + existingDeviceDict[device].targetHost + ':' + existingDeviceDict[device].targetPort + ' because its state is:' + existingDeviceDict[device].state);
+                            this.logger.info(LOGGINGPREFIX + 'resetting ' + existingDeviceDict[device].targetHost + ':' + existingDeviceDict[device].targetPort + ' because its state is:' + existingDeviceDict[device].state);
                             if (!desiredDeviceDict[device].hasOwnProperty('targetUsername') ||
                                 !desiredDeviceDict[device].hasOwnProperty('targetPassphrase')) {
                                 const err = new Error();
@@ -315,7 +317,7 @@ class TrustedDevicesWorker {
                                 returnDevice.available = false;
                             }
                             if ((device.state.indexOf('FAIL') > -1) || (device.state.indexOf('ERROR') > -1)) {
-                                this.logger.severe('removing device ' + device.machineId + ' in state: ' + device.state);
+                                this.logger.severe(LOGGINGPREFIX + 'removing device ' + device.machineId + ' in state: ' + device.state);
                                 returnDevice.machineId = device.machineId;
                                 returnDevice.url = deviceGroupsUrl + '/' + device.groupName + '/devices/' + device.uuid;
                                 if (device.hasOwnProperty('mcpDeviceName')) {
@@ -380,7 +382,7 @@ class TrustedDevicesWorker {
                     .then((deviceGroup) => {
                         return this.addDevice(deviceGroup, device)
                             .then((deviceResponse) => {
-                                this.logger.info('added device id is: ' + deviceResponse.uuid);
+                                this.logger.info(LOGGINGPREFIX + 'added device id is: ' + deviceResponse.uuid);
                                 targetDeviceQueries.push({
                                     deviceGroup: deviceGroup,
                                     deviceId: deviceResponse.uuid
@@ -389,7 +391,7 @@ class TrustedDevicesWorker {
                             });
                     })
                     .catch((err) => {
-                        this.logger.severe(err.message);
+                        this.logger.severe(LOGGINGPREFIX + err.message);
                         throw err;
                     });
                 resolvePromises.push(resolvePromise);
@@ -407,7 +409,7 @@ class TrustedDevicesWorker {
                                     }
                                 });
                                 if (!deviceFound) {
-                                    this.logger.severe('could not find added device ' + queryItems.deviceId + ' in group ' + queryItems.deviceGroup);
+                                    this.logger.severe(LOGGINGPREFIX + 'could not find added device ' + queryItems.deviceId + ' in group ' + queryItems.deviceGroup);
                                 }
                                 return Promise.resolve();
                             });
@@ -417,7 +419,7 @@ class TrustedDevicesWorker {
                 })
                 .catch(err => {
                     const throwErr = new Error('could not add trusted device to proxy - ' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     throw throwErr;
                 });
         }
@@ -442,7 +444,7 @@ class TrustedDevicesWorker {
             return Promise.all(deletePromises)
                 .catch((err) => {
                     const throwErr = new Error('could not remove trusted device from the proxy - ' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     throw throwErr;
                 });
         }
@@ -469,7 +471,7 @@ class TrustedDevicesWorker {
     removeCertificateFromTrustedDevice(device, machineId) {
         let majorVersion = parseInt(device.targetRESTVersion.split('.')[0]);
         if (majorVersion > 12) {
-            this.logger.info('removing certificate for machineId: ' + machineId + ' from device ' + device.targetHost + ':' + device.targetPort);
+            this.logger.info(LOGGINGPREFIX + 'removing certificate for machineId: ' + machineId + ' from device ' + device.targetHost + ':' + device.targetPort);
             const certificatePromises = [];
             return this.queryCertificatesOnRemoteDevice(device)
                 .then((certificates) => {
@@ -492,7 +494,7 @@ class TrustedDevicesWorker {
      */
 
     removeCertificateFromProxy(machineId) {
-        this.logger.info('removing certificate for machineId: ' + machineId + ' from proxy');
+        this.logger.info(LOGGINGPREFIX + 'removing certificate for machineId: ' + machineId + ' from proxy');
         const certificatePromises = [];
         return this.queryCertificatesOnProxy()
             .then((certificates) => {
@@ -534,7 +536,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error get machineId on the proxy :' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
         });
@@ -561,7 +563,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error querying device groups:' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
         });
@@ -585,7 +587,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error querying devices :' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
         });
@@ -607,10 +609,10 @@ class TrustedDevicesWorker {
                                     if (this.failedDevices[device.targetHost + ':' + device.targetPort] && (this.FAILED_DEVICE_REMOVAL_MILLISECONDS > 0)) {
                                         const secLeft = new Date().getTime() - this.failedDevices[device.targetHost + ':' + device.targetPort];
                                         if (secLeft > this.FAILED_DEVICE_REMOVAL_MILLISECONDS) {
-                                            this.logger.severe('could not reach active device ' + device.targetHost + ':' + device.targetPort + ' for ' + ((this.FAILED_DEVICE_REMOVAL_MILLISECONDS + secLeft) / 1000) + ' seconds.. removing trust.');
+                                            this.logger.severe(LOGGINGPREFIX + 'could not reach active device ' + device.targetHost + ':' + device.targetPort + ' for ' + ((this.FAILED_DEVICE_REMOVAL_MILLISECONDS + secLeft) / 1000) + ' seconds.. removing trust.');
                                             this.removeDevices([device]);
                                         } else {
-                                            this.logger.severe('could not reach active device ' + device.targetHost + ':' + device.targetPort + ' ' + ((this.FAILED_DEVICE_REMOVAL_MILLISECONDS - secLeft) / 1000) + ' seconds left until it will be removed from the trust.');
+                                            this.logger.severe(LOGGINGPREFIX + 'could not reach active device ' + device.targetHost + ':' + device.targetPort + ' ' + ((this.FAILED_DEVICE_REMOVAL_MILLISECONDS - secLeft) / 1000) + ' seconds left until it will be removed from the trust.');
                                         }
                                     } else {
                                         this.failedDevices[device.targetHost + ':' + device.targetPort] = new Date();
@@ -621,7 +623,7 @@ class TrustedDevicesWorker {
                 });
             })
             .catch((err) => {
-                this.logger.severe('could not validate devices - ' + err.message);
+                this.logger.severe(LOGGINGPREFIX + 'could not validate devices - ' + err.message);
             });
     }
 
@@ -632,7 +634,7 @@ class TrustedDevicesWorker {
      */
     createDeviceGroup(groupName) {
         return new Promise((resolve, reject) => {
-            this.logger.info('creating proxy device group ' + groupName);
+            this.logger.info(LOGGINGPREFIX + 'creating proxy device group ' + groupName);
             // get existing device groups to find index
             const createBody = {
                 "groupName": groupName,
@@ -650,7 +652,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error creating device group :' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
         });
@@ -673,12 +675,12 @@ class TrustedDevicesWorker {
                 .setBody(createBody);
             this.restRequestSender.sendPost(devicePostRequest)
                 .then((response) => {
-                    this.logger.info('added ' + device.targetHost + ':' + device.targetPort + ' to proxy device group ' + deviceGroup);
+                    this.logger.info(LOGGINGPREFIX + 'added ' + device.targetHost + ':' + device.targetPort + ' to proxy device group ' + deviceGroup);
                     resolve(response.getBody());
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error adding device :' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
         });
@@ -691,7 +693,7 @@ class TrustedDevicesWorker {
      */
     removeDevice(device) {
         return new Promise((resolve, reject) => {
-            this.logger.info('removing ' + device.targetHost + ':' + device.targetPort + ' from device group on proxy');
+            this.logger.info(LOGGINGPREFIX + 'removing ' + device.targetHost + ':' + device.targetPort + ' from device group on proxy');
             const deviceDeleteRequest = this.restOperationFactory.createRestOperationInstance()
                 .setUri(this.url.parse(device.url))
                 .setBasicAuthorization(localauth)
@@ -703,7 +705,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error removing device from device group:' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
         });
@@ -727,7 +729,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error querying certificates from proxy :' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
         });
@@ -747,7 +749,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error deleting certificate on proxy :' + err.message);
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
         });
@@ -773,7 +775,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error querying certificate on the device :' + err.message + ' assuming offline or untrusted.');
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     resolve([]);
                 });
         });
@@ -795,7 +797,7 @@ class TrustedDevicesWorker {
                 })
                 .catch((err) => {
                     const throwErr = new Error('Error deleting certificate from device :' + err.message + ' assuming offline or untrusted');
-                    this.logger.severe(throwErr.message);
+                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     resolve();
                 });
         });
@@ -817,7 +819,7 @@ class TrustedDevicesWorker {
                 .catch((err) => {
                     const throwErr = new Error();
                     this.failedReasons[device.targetHost + ':' + device.targetPort] = err.message;
-                    this.logger.severe('Error validating trust of ' + device.targetHost + ':' + device.targetPort + ' - ' + err.message);
+                    this.logger.severe(LOGGINGPREFIX + 'Error validating trust of ' + device.targetHost + ':' + device.targetPort + ' - ' + err.message);
                     resolve(false);
                 });
         });
