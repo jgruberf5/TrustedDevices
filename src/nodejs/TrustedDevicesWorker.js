@@ -13,7 +13,7 @@ const DEVICEGROUP_PREFIX = 'TrustProxy_';
 const MAX_DEVICES_PER_GROUP = 20;
 const DEVICE_QUERY_INTERVAL = 10000;
 
-const LOGGINGPREFIX = '[TrustedDevices], ';
+const LOGGINGPREFIX = '[TrustedDevices] ';
 
 /**
  * delay timer
