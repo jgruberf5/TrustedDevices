@@ -141,6 +141,117 @@ class TrustedDevicesWorker {
         }
     }
 
+
+    /**
+     * handle onPut HTTP request
+     * @param {Object} restOperation - body is the declared devices add to trusted devices
+     */
+    onPut(restOperation) {
+        try {
+            // get the post body from the request
+            const declaration = restOperation.getBody();
+            if (!declaration || !declaration.hasOwnProperty('devices')) {
+                // there was no declaration body submitted, return an error
+                const err = new Error();
+                err.message = 'declaration missing';
+                err.httpStatusCode = 400;
+                this.logger.severe(LOGGINGPREFIX + "PUT request to trusted devices failed: declaration missing");
+                restOperation.fail(err);
+                return;
+            }
+            this.getDevices(false, null)
+                .then((devices) => {
+                    declaration.devices.forEach((device) => {
+                        devices.push(device);
+                    });
+                    this.declareDevices(devices)
+                        .then((declaredDevices) => {
+                            restOperation.statusCode = 200;
+                            restOperation.body = {
+                                devices: declaredDevices
+                            };
+                            this.completeRestOperation(restOperation);
+                        })
+                        .catch((err) => {
+                            this.logger.severe(LOGGINGPREFIX + "PUT request to trusted devices failed:" + err.message);
+                            restOperation.fail(err);
+                        });
+                })
+                .catch((err) => {
+                    this.logger.severe(LOGGINGPREFIX + "PUT request to trusted devices failed:" + err.message);
+                    restOperation.fail(err);
+                });
+        } catch (err) {
+            this.logger.severe(LOGGINGPREFIX + "PUT request to update trusted devices failed: \n%s", err);
+            err.httpStatusCode = 400;
+            restOperation.fail(err);
+        }
+    }
+
+
+    /**
+     * handle onDelete HTTP request to delete trusted devices
+     * @param {Object} restOperation
+     */
+    onDelete(restOperation) {
+        const paths = restOperation.uri.pathname.split('/');
+        const query = restOperation.uri.query;
+
+        let targetDevice = null;
+
+        if (query.targetHost) {
+            targetDevice = query.targetHost;
+        } else if (query.targetUUID) {
+            targetDevice = query.targetUUID;
+        } else if (paths.length > 3) {
+            targetDevice = paths[3];
+        }
+
+        try {
+            if (targetDevice) {
+                this.getDevices(false, null)
+                    .then((devices) => {
+                        let desiredDevices = [];
+                        restOperation.statusCode = 404;
+                        devices.forEach((device) => {
+                            if (device.targetHost == targetDevice || device.targetUUID == targetDevice) {
+                                this.logger.info(LOGGINGPREFIX + "deleting device: " + device.targetHost + ':' + device.targetPort);
+                            } else {
+                                desiredDevices.push(device);
+                            }
+                        });
+                        this.declareDevices(desiredDevices)
+                            .then((declaredDevices) => {
+                                restOperation.statusCode = 200;
+                                restOperation.body = {
+                                    devices: declaredDevices
+                                };
+                                this.completeRestOperation(restOperation);
+                            })
+                            .catch((err) => {
+                                this.logger.severe(LOGGINGPREFIX + "DELETE request to trusted devices failed:" + err.message);
+                                restOperation.fail(err);
+                            });
+                    })
+                    .catch((err) => {
+                        throw err;
+                    });
+            } else {
+                const err = new Error();
+                err.message = 'to delete all trusted devices, POST an empty device list';
+                err.httpStatusCode = 400;
+                this.logger.severe(LOGGINGPREFIX + err.message);
+                restOperation.fail(err);
+                return;
+            }
+        } catch (err) {
+            this.logger.severe(LOGGINGPREFIX + "GET request to retrieve trusted devices failed: \n%s", err);
+            err.httpStatusCode = 400;
+            restOperation.fail(err);
+        }
+    }
+
+
     declareDevices(desiredDevices) {
         // Create comparison collections.
         const desiredDeviceDict = {};

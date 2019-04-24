@@ -233,6 +233,80 @@ Response
 
 ```
 
+You can append devices to the existing trusts by using the `PUT` method using the same declaration format, but supplying only the devices you want to append trusts.
+
+To add a trust for the device at `172.13.1.108` with an existing trust at `172.13.1.107` declare them as follows:
+
+`PUT` `/mgmt/shared/TrustedDevices`
+
+Body
+```
+{
+    "devices": [
+        {
+            "targetHost": "172.13.1.108",
+            "targetPort": 443,
+            "targetUsername": "admin",
+            "targetPassphrase": "admin"
+        }
+    ]
+}
+```
+
+Response
+```
+{
+    "devices": [
+        {
+            "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
+            "targetHost": "172.13.1.107",
+            "targetPort": 443,
+            "state": "ACTIVE",
+            "targetHostname": "bigip1.openstack.local",
+            "targetVersion": "13.1.1",
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": false
+        },
+        {
+            "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
+            "targetHost": "172.13.1.108",
+            "targetPort": 443,
+            "state": "CREATED",
+            "targetHostname": "bigip2.openstack.local",
+            "targetVersion": "13.1.1",
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": false
+        }
+    ]
+}
+```
+
+You can delete specific devices from the trusts by using the `DELETE` method specifying the device by either including the `targetUUID` as the last path element, or indicating the `targetHost` as a query parameter.
+
+To delete all trusts, use the `POST` method with an empty device declaration.
+
+To delete only the device trust for the device with the `targetUUID` of `e634cbdc-8690-4f03-acdc-219197788fc1`:
+
+`DELETE` `/mgmt/shared/TrustedDevices/e634cbdc-8690-4f03-acdc-219197788fc1`
+
+Response
+```
+{
+    "devices": [
+        {
+            "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
+            "targetHost": "172.13.1.107",
+            "targetPort": 443,
+            "state": "CREATED",
+            "targetHostname": "bigip1.openstack.local",
+            "targetVersion": "13.1.1",
+            "targetRESTVersion": "13.1.1-0.0.4",
+            "available": false
+        }
+    ]
+}
+```
+
 **Detecting Trust Failures**
 
 TrustedDevices polls all declared devices and attempts to make an iControl REST call through the trust every 10 seconds. If the API call succeeds, the `available` attribute for the device is set to `true`, and a `lastValidated` attribute is populated showing the last time trust validation occurred. If the API call fails, the `available` attribute for the device is set to `false`, and two new attributes are added, `failedSince` and `failedReason`. The `failedSince` attribute will show the time of the first of any successive failures and the `failedReason` will show the reason for the last recorded failure.
