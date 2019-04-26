@@ -233,7 +233,7 @@ Response
 
 ```
 
-You can append devices to the existing trusts by using the `PUT` method using the same declaration format, but supplying only the devices you want to append trusts.
+You can append devices to the existing trusts by using the `PUT` method using the same declaration format, but supplying only the devices you want to append trusts. The `PUT` method will only return the devices trusts being appended, it will not return other existing devices.
 
 To add a trust for the device at `172.13.1.108` with an existing trust at `172.13.1.107` declare them as follows:
 
@@ -258,16 +258,6 @@ Response
 {
     "devices": [
         {
-            "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
-            "targetHost": "172.13.1.107",
-            "targetPort": 443,
-            "state": "ACTIVE",
-            "targetHostname": "bigip1.openstack.local",
-            "targetVersion": "13.1.1",
-            "targetRESTVersion": "13.1.1-0.0.4",
-            "available": false
-        },
-        {
             "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
             "targetHost": "172.13.1.108",
             "targetPort": 443,
@@ -281,7 +271,7 @@ Response
 }
 ```
 
-You can delete specific devices from the trusts by using the `DELETE` method specifying the device by either including the `targetUUID` as the last path element, or indicating the `targetHost` as a query parameter.
+You can delete specific devices from the trusts by using the `DELETE` method specifying the device by either including the `targetUUID` as the last path element, or indicating the `targetHost` as a query parameter. The `DELETE` method will return only the device being deleted, now in the `DELETING` state. If the requested device is not already trusted, it will return an empty list rather then an error. 
 
 To delete all trusts, use the `POST` method with an empty device declaration.
 
@@ -294,11 +284,11 @@ Response
 {
     "devices": [
         {
-            "targetUUID": "7390b3b8-7682-4554-83e5-764e4f26703c",
-            "targetHost": "172.13.1.107",
+            "targetUUID": "e634cbdc-8690-4f03-acdc-219197788fc1",
+            "targetHost": "172.13.1.108",
             "targetPort": 443,
-            "state": "CREATED",
-            "targetHostname": "bigip1.openstack.local",
+            "state": "DELETING",
+            "targetHostname": "bigip2.openstack.local",
             "targetVersion": "13.1.1",
             "targetRESTVersion": "13.1.1-0.0.4",
             "available": false

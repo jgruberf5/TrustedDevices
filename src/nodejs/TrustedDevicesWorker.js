@@ -9,6 +9,7 @@ const deviceInfoUrl = 'http://localhost:8100/mgmt/shared/identified-devices/conf
 const localauth = 'Basic ' + new Buffer('admin:').toString('base64');
 const ACTIVE = 'ACTIVE';
 const UNDISCOVERED = 'UNDISCOVERED';
+const DELETING = 'DELETING';
 const DEVICEGROUP_PREFIX = 'TrustProxy_';
 const MAX_DEVICES_PER_GROUP = 20;
 const DEVICE_QUERY_INTERVAL = 10000;
@@ -165,10 +166,19 @@ class TrustedDevicesWorker {
                         devices.push(device);
                     });
                     this.declareDevices(devices)
-                        .then((declaredDevices) => {
+                        .then((devices) => {
+                            // return only the updated devices you requested .. loops are easier to read then filter
+                            const returnDevices = [];
+                            devices.forEach((device) => {
+                                declaration.devices.forEach((declaredDevice) => {
+                                    if (device.targetHost == declaredDevice.targetHost && device.targetPort == declaredDevice.targetPort) {
+                                        returnDevices.push(device);
+                                    }
+                                });
+                            });
                             restOperation.statusCode = 200;
                             restOperation.body = {
-                                devices: declaredDevices
+                                devices: returnDevices
                             };
                             this.completeRestOperation(restOperation);
                         })
@@ -211,20 +221,23 @@ class TrustedDevicesWorker {
             if (targetDevice) {
                 this.getDevices(false, null)
                     .then((devices) => {
-                        let desiredDevices = [];
+                        const desiredDevices = [];
+                        const returnDevices = [];
                         restOperation.statusCode = 404;
                         devices.forEach((device) => {
                             if (device.targetHost == targetDevice || device.targetUUID == targetDevice) {
                                 this.logger.info(LOGGINGPREFIX + "deleting device: " + device.targetHost + ':' + device.targetPort);
+                                device.state = DELETING;
+                                returnDevices.push(device);
                             } else {
                                 desiredDevices.push(device);
                             }
                         });
                         this.declareDevices(desiredDevices)
-                            .then((declaredDevices) => {
+                            .then((devices) => {
                                 restOperation.statusCode = 200;
                                 restOperation.body = {
-                                    devices: declaredDevices
+                                    devices: returnDevices
                                 };
                                 this.completeRestOperation(restOperation);
                             })
