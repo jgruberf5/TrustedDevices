@@ -37,16 +37,18 @@ class TrustedDevicesWorker {
         this.failedDevices = {};
         this.failedReasons = {};
         this.reachableDevices = {};
-        if(process.env.FAILED_DEVICE_REMOVAL_MILLISECONDS) {
+        if (process.env.FAILED_DEVICE_REMOVAL_MILLISECONDS) {
             this.FAILED_DEVICE_REMOVAL_MILLISECONDS = process.env.FAILED_DEVICE_REMOVAL_MILLISECONDS;
         } else {
             this.FAILED_DEVICE_REMOVAL_MILLISECONDS = 0;
         }
+        this.machineId = null;
     }
 
     onStart(success) {
         setImmediate(this.validateDevices.bind(this));
         setInterval(this.validateDevices.bind(this), DEVICE_QUERY_INTERVAL);
+        this.getProxyMachineId();
         success();
     }
 
@@ -372,7 +374,7 @@ class TrustedDevicesWorker {
                         Object.keys(candidateGroups).forEach((groupName) => {
                             const indx = parseInt(groupName.slice(DEVICEGROUP_PREFIX.length));
                             if (indx > lastGroupIndx) lastGroupIndx = indx;
-                            if (candidateGroups[groupName] < MAX_DEVICES_PER_GROUP) ++numberOfAvailableGroups;
+                            if (candidateGroups[groupName] < MAX_DEVICES_PER_GROUP)++numberOfAvailableGroups;
                         });
                         if (numberOfAvailableGroups === 0) {
                             // no capacity left, create a group.
@@ -391,10 +393,8 @@ class TrustedDevicesWorker {
      * @returns Promise when request completes
      */
     getDevices(inlcudeHidden, targetDevice) {
-        let proxyMachineId = null;
         return this.getProxyMachineId()
-            .then((machineId) => {
-                proxyMachineId = machineId;
+            .then(() => {
                 return this.getDeviceGroups();
             })
             .then((deviceGroups) => {
@@ -415,7 +415,7 @@ class TrustedDevicesWorker {
                             (device.hasOwnProperty('mcpDeviceName') ||
                                 this.inProgress(device.state) ||
                                 inlcudeHidden) &&
-                            (proxyMachineId !== device.machineId)
+                            (this.machineId !== device.machineId)
                         ) {
                             // Add devices .. ASG and BIG-IP have machineIds
                             const returnDevice = {
@@ -576,8 +576,8 @@ class TrustedDevicesWorker {
 
     removeCertificate(device) {
         return this.getProxyMachineId()
-            .then((machineId) => {
-                return this.removeCertificateFromTrustedDevice(device, machineId);
+            .then(() => {
+                return this.removeCertificateFromTrustedDevice(device, this.machineId);
             })
             .then(() => {
                 if (device.hasOwnProperty('machineId')) {
@@ -639,30 +639,38 @@ class TrustedDevicesWorker {
      */
     getProxyMachineId() {
         return new Promise((resolve, reject) => {
-            const certGetRequest = this.restOperationFactory.createRestOperationInstance()
-                .setUri(this.url.parse(deviceInfoUrl))
-                .setBasicAuthorization(localauth)
-                .setIsSetBasicAuthHeader(true)
-                .setReferer(this.getUri().href);
-            this.restRequestSender.sendGet(certGetRequest)
-                .then((response) => {
-                    const deivceInfoBody = response.getBody();
-                    if (deivceInfoBody.hasOwnProperty('machineId')) {
-                        resolve(deivceInfoBody.machineId);
-                    } else {
-                        if (fs.existsSync('/machineId')) {
-                            return String(fs.readFileSync('/machineId', 'utf8')).replace(/[^ -~]+/g, "");
+            if (this.machineId) {
+                resolve();
+            } else if (fs.existsSync('/machineId')) {
+                // this is an ASG container
+                this.machineId = String(fs.readFileSync('/machineId', 'utf8')).replace(/[^ -~]+/g, "");
+                this.logger.info('Found proxy machineId in /machineId file');
+                this.logger.info('Setting proxy machineId to: ' + this.machineId);
+                resolve();
+            } else {
+                const certGetRequest = this.restOperationFactory.createRestOperationInstance()
+                    .setUri(this.url.parse(deviceInfoUrl))
+                    .setBasicAuthorization(localauth)
+                    .setIsSetBasicAuthHeader(true)
+                    .setReferer(this.getUri().href);
+                this.restRequestSender.sendGet(certGetRequest)
+                    .then((response) => {
+                        const deivceInfoBody = response.getBody();
+                        if (deivceInfoBody.hasOwnProperty('machineId')) {
+                            this.logger.info('Setting proxy machineId to: ' + deivceInfoBody.machineId);
+                            this.machineId = deivceInfoBody.machineId;
+                            resolve();
                         } else {
                             const err = new Error('can not resolve proxy machineId');
                             reject(err);
                         }
-                    }
-                })
-                .catch((err) => {
-                    const throwErr = new Error('Error get machineId on the proxy :' + err.message);
-                    this.logger.severe(LOGGINGPREFIX + throwErr.message);
-                    reject(throwErr);
-                });
+                    })
+                    .catch((err) => {
+                        const throwErr = new Error('Error get machineId on the proxy :' + err.message);
+                        this.logger.severe(LOGGINGPREFIX + throwErr.message);
+                        reject(throwErr);
+                    });
+            }
         });
     }
 
