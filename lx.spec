@@ -1,7 +1,7 @@
 Summary: TrustedDevices for the Application Services Gateway
 Name: TrustedDevices
 Version: 1.3.0
-Release: 0001
+Release: 0005
 BuildArch: noarch
 Group: Development/Libraries
 License: Apache-2.0

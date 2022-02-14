@@ -652,6 +652,7 @@ class TrustedDevicesWorker {
                     .setUri(this.url.parse(deviceInfoUrl))
                     .setBasicAuthorization(localauth)
                     .setIsSetBasicAuthHeader(true)
+                    .setHeader('Connection', 'close')
                     .setReferer(this.getUri().href);
                 this.restRequestSender.sendGet(certGetRequest)
                     .then((response) => {
@@ -679,7 +680,8 @@ class TrustedDevicesWorker {
             const deviceGroupsGetRequest = this.restOperationFactory.createRestOperationInstance()
                 .setUri(this.url.parse(deviceGroupsUrl))
                 .setBasicAuthorization(localauth)
-                .setIsSetBasicAuthHeader(true);
+                .setIsSetBasicAuthHeader(true)
+                .setHeader('Connection', 'close');
             this.restRequestSender.sendGet(deviceGroupsGetRequest)
                 .then((response) => {
                     let returnDeviceGroups = [];
@@ -694,7 +696,7 @@ class TrustedDevicesWorker {
                     resolve(returnDeviceGroups);
                 })
                 .catch((err) => {
-                    const throwErr = new Error('Error querying device groups:' + err.message);
+                    const throwErr = new Error('Error querying device groups:' + JSON.stringify(err) + ' ' + JSON.stringify(err.message));
                     this.logger.severe(LOGGINGPREFIX + throwErr.message);
                     reject(throwErr);
                 });
@@ -707,7 +709,8 @@ class TrustedDevicesWorker {
             const devicesGetRequest = this.restOperationFactory.createRestOperationInstance()
                 .setUri(this.url.parse(devicesGroupUrl))
                 .setBasicAuthorization(localauth)
-                .setIsSetBasicAuthHeader(true);
+                .setIsSetBasicAuthHeader(true)
+                .setHeader('Connection', 'close');
             this.restRequestSender.sendGet(devicesGetRequest)
                 .then((response) => {
                     let returnDevices = [];
@@ -777,6 +780,7 @@ class TrustedDevicesWorker {
                 .setUri(this.url.parse(deviceGroupsUrl))
                 .setBasicAuthorization(localauth)
                 .setIsSetBasicAuthHeader(true)
+                .setHeader('Connection', 'close')
                 .setBody(createBody);
             this.restRequestSender.sendPost(deviceGroupsPostRequest)
                 .then((response) => {
@@ -804,6 +808,7 @@ class TrustedDevicesWorker {
                 .setUri(this.url.parse(devicesUrl))
                 .setBasicAuthorization(localauth)
                 .setIsSetBasicAuthHeader(true)
+                .setHeader('Connection', 'close')
                 .setBody(createBody);
             this.restRequestSender.sendPost(devicePostRequest)
                 .then((response) => {
@@ -830,6 +835,7 @@ class TrustedDevicesWorker {
                 .setUri(this.url.parse(device.url))
                 .setBasicAuthorization(localauth)
                 .setIsSetBasicAuthHeader(true)
+                .setHeader('Connection', 'close')
                 .setReferer(this.getUri().href);
             this.restRequestSender.sendDelete(deviceDeleteRequest)
                 .then((response) => {
@@ -874,6 +880,7 @@ class TrustedDevicesWorker {
                 .setUri(this.url.parse(certDelUrl))
                 .setBasicAuthorization(localauth)
                 .setIsSetBasicAuthHeader(true)
+                .setHeader('Connection', 'close')
                 .setReferer(this.getUri().href);
             this.restRequestSender.sendDelete(certDelRequest)
                 .then((response) => {
